@@ -13,7 +13,7 @@ import type { JointAngles } from '../../data/mappingPresets'
 
 // Keep both teaching pages on the same reviewed asset. The revision query
 // prevents a browser from reusing the pre-correction GLB after deployment.
-export const HSAD_MODEL_URL = `${import.meta.env.BASE_URL}models/hsad/hsad_reference_device.glb?rev=6.1-worn`
+export const HSAD_MODEL_URL = `${import.meta.env.BASE_URL}models/hsad/hsad_reference_device.glb?rev=7.0-fit`
 
 export type HSADSelection = { type: 'joint' | 'part'; id: string; hit?: { uuid: string; indices: number[]; weights: number[] } }
 export type HSADSelectionEvent = HSADSelection & { clientX: number; clientY: number }
@@ -33,6 +33,11 @@ type HandProps = {
 
 
 const wornSpread: Partial<Record<JointId, number>> = { I1: -7, M1: -1, R1: 3, L1: 8 }
+
+// Metacarpal heads form an arch. On closure the ulnar fingers rotate
+// toward the thumb and the spread between neighbouring digits diminishes.
+const closedSpread: Partial<Record<JointId, number>> = { I1: 2, M1: 0, R1: -2, L1: -4 }
+const fingerRoll: Partial<Record<JointId, number>> = { I1: 5, M1: 0, R1: -6, L1: -12 }
 
 const flexAxes: Record<FlexAxis, THREE.Vector3> = {
   x: new THREE.Vector3(1, 0, 0),
@@ -136,8 +141,12 @@ function ModelControls({ target, focusKey, resetNonce = 0, marker, device }: Gui
     const aspect = size.width / Math.max(1, size.height)
     const distance = Math.max(9.6, 6.8 / Math.max(0.25, aspect))
     instance.maxDistance = Math.max(13, distance * 1.4)
+    // Consume residual orbit damping before restoring the frontal view.
+    instance.enableDamping = false
+    instance.update()
+    instance.enableDamping = true
     instance.target.set(0, 0, 0)
-    camera.position.set(device ? .24 : .03, device ? .14 : .02, 1).normalize().multiplyScalar(distance)
+    camera.position.set(device ? 0 : .03, device ? 0 : .02, 1).normalize().multiplyScalar(distance)
     instance.update()
   }, [camera, resetNonce, size.width, size.height, device])
 
@@ -262,6 +271,8 @@ function LoadedHand({ angles, pitch = 0, yaw = 0, roll = 0, selected, onSelect, 
     })
   }, [scene, selected, presentation])
 
+  const twist = useMemo(() => new THREE.Quaternion(), [])
+  const displayedAngles = useRef<JointAngles>({ ...angles })
   const spread = useMemo(() => new THREE.Quaternion(), [])
   const flexion = useMemo(() => new THREE.Quaternion(), [])
 
@@ -271,26 +282,29 @@ function LoadedHand({ angles, pitch = 0, yaw = 0, roll = 0, selected, onSelect, 
       const bone = scene.getObjectByName(joint.boneNode)
       const rest = restQuaternions.get(joint.id)
       if (!bone || !rest) return
-      const bend = THREE.MathUtils.degToRad((angles[joint.id] ?? 0) * joint.flexSign)
+      const rate = joint.joint === 'DIP' || joint.joint === 'IP' ? 8 : joint.joint === 'PIP' ? 11 : 9
+      const digitRate = joint.id[0] === 'T' ? .78 : joint.id[0] === 'L' ? 1.15 : joint.id[0] === 'R' ? 1.08 : 1
+      const angle = THREE.MathUtils.damp(displayedAngles.current[joint.id] ?? 0, angles[joint.id] ?? 0, rate * digitRate, delta)
+      displayedAngles.current[joint.id] = angle
+      const bend = THREE.MathUtils.degToRad(angle * joint.flexSign)
       flexion.setFromAxisAngle(flexAxes[joint.flexAxis], bend)
-      const splay = presentation === 'device' ? wornSpread[joint.id] ?? 0 : 0
+      const closure = THREE.MathUtils.smoothstep(angle, 4, 72)
+      const splay = THREE.MathUtils.lerp(wornSpread[joint.id] ?? 0, closedSpread[joint.id] ?? 0, closure)
       spread.setFromAxisAngle(flexAxes.z, THREE.MathUtils.degToRad(splay))
-      targetQuaternion.copy(rest).multiply(spread).multiply(flexion)
-      bone.quaternion.slerp(targetQuaternion, 1 - Math.exp(-delta * 8.5))
+      twist.setFromAxisAngle(flexAxes.y, THREE.MathUtils.degToRad((fingerRoll[joint.id] ?? 0) * closure))
+      bone.quaternion.copy(rest).multiply(spread).multiply(twist).multiply(flexion)
     })
-    // Thumb_CMC is an auxiliary (non-sensing) bone. A restrained in-plane
-    // opposition component keeps the thumb base connected and makes T1/T2
-    // flexion read as a hand movement rather than a hinged side branch.
     const thumbCmc = scene.getObjectByName('Thumb_CMC')
     if (thumbCmc && thumbCmcRest) {
-      const opposition = THREE.MathUtils.degToRad((angles.T1 ?? 0) * 0.22)
-      flexion.setFromAxisAngle(flexAxes.z, opposition)
-      targetQuaternion.copy(thumbCmcRest).multiply(flexion)
-      thumbCmc.quaternion.slerp(targetQuaternion, 1 - Math.exp(-delta * 7.5))
+      const opposition = THREE.MathUtils.smoothstep(displayedAngles.current.T1 ?? 0, 3, 48)
+      spread.setFromAxisAngle(flexAxes.z, THREE.MathUtils.degToRad(4 - 16 * opposition))
+      twist.setFromAxisAngle(flexAxes.y, THREE.MathUtils.degToRad(12 + 11 * opposition))
+      flexion.setFromAxisAngle(flexAxes.x, THREE.MathUtils.degToRad(-4 - 45 * opposition))
+      thumbCmc.quaternion.copy(thumbCmcRest).multiply(spread).multiply(twist).multiply(flexion)
     }
     if (root.current) {
       targetQuaternion.setFromEuler(new THREE.Euler(
-        THREE.MathUtils.degToRad(pitch), THREE.MathUtils.degToRad(yaw), THREE.MathUtils.degToRad(roll + (presentation === 'device' ? -37 : 0)), 'YXZ',
+        THREE.MathUtils.degToRad(pitch), THREE.MathUtils.degToRad(yaw), THREE.MathUtils.degToRad(roll), 'YXZ',
       ))
       root.current.quaternion.slerp(targetQuaternion, 1 - Math.exp(-delta * 7))
     }
@@ -360,7 +374,7 @@ export function HSADHand3D(props: HandProps) {
     <span id={descriptionId} className="sr-only">深色柔性手套上覆盖橙黄色柔性 FPC、十四个检测单元与手背采集模块。三维舞台支持鼠标旋转缩放；所有关节选择和角度设置也可通过舞台旁的表单控件完成。</span>
     <ModelBoundary>
       <Suspense fallback={<div className="model-error"><strong>正在载入完整 HSAD 模型…</strong></div>}>
-        <Canvas aria-label="HSAD 三维手交互视图" camera={{ position: [1.65, 0.85, 7.4], fov: 38 }} dpr={[1, 1.6]} gl={{ antialias: true, alpha: true }} onCreated={({ gl }) => { gl.domElement.setAttribute('role', 'img'); gl.domElement.setAttribute('aria-label', 'HSAD 三维手交互视图') }}>
+        <Canvas aria-label="HSAD 三维手交互视图" camera={{ position: [0, 0, 9.6], fov: 38 }} dpr={[1, 1.6]} gl={{ antialias: true, alpha: true }} onCreated={({ gl }) => { gl.domElement.setAttribute('role', 'img'); gl.domElement.setAttribute('aria-label', 'HSAD 三维手交互视图') }}>
           <hemisphereLight args={['#f4f8ff', '#b1a69b', 1.15]} />
           <directionalLight position={[-4, 7, 6]} intensity={2.15} />
           <directionalLight position={[4, 2, -3]} intensity={1.7} color="#c6edf0" />

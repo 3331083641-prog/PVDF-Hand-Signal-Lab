@@ -26,69 +26,19 @@ def xy(uv):
     return (np.asarray(uv)-[215,610])*[1/110,-1/110]+[0,.40]
 
 
-# Register the support and joint axes to the photo, rather than stretching the circuit.
-landmarks = {
- "Index": [(343,523),(359,321),(370,202),(375,111)],
- "Middle":[(246,507),(258,283),(265,165),(269,72)],
- "Ring":  [(155,518),(155,305),(156,190),(156,102)],
- "Little":[(73,537),(73,369),(71,263),(69,182)],
- "Thumb": [(408,765),(509,670),(619,530),(688,442)],
-}
-source, target = [],[]
-for finger, pixels in landmarks.items():
-    suffixes = ("CMC","MCP","IP") if finger=="Thumb" else ("MCP","PIP","DIP")
-    chain = [rig.data.bones[f"{finger}_{s}"] for s in suffixes]
-    source += [list(b.head_local)[:2] for b in chain]+[list(chain[-1].tail_local)[:2]]
-    target += list(xy(pixels))
-for coord, pixel in [((-.9,-2.65),(118,908)),((1,-2.65),(358,908)),((0,-1.5),(219,812)),
-    ((-1.23,-1.1),(49,779)),((1.38,-.92),(396,754)),((0,.1),(218,641)),
-    ((-1.41,.15),(43,636)),((1.42,.18),(386,632))]:
-    source.append(coord)
-    target.append(xy(pixel))
-src=np.array(source)
-def radial(p):
-    d=np.sum((p[:,None,:]-src[None,:,:])**2,axis=2)
-    return d*np.log(np.maximum(d,1e-16))
-aff=np.column_stack([np.ones(len(src)),src])
-coef=np.linalg.solve(np.block([[radial(src),aff],[aff.T,np.zeros((3,3))]]),
-                     np.vstack([target,np.zeros((3,2))]))
-def warp(points):
-    p=np.atleast_2d(points)
-    return np.column_stack([radial(p),np.ones(len(p)),p])@coef
+sys.path.insert(0,str(Path(__file__).resolve().parent))
+from fit_worn_hand import register_rig, sculpt
 
-for obj in (shell,cuff):
-    coords=np.zeros(len(obj.data.vertices)*3,dtype=np.float32)
-    obj.data.vertices.foreach_get("co",coords)
-    coords=coords.reshape((-1,3))
-    coords[:,:2]=warp(coords[:,:2])
-    if obj == shell:
-        # The photographed board wraps the heel of the thumb. Add the thenar
-        # volume beneath this flare, fading it into the wrist and thumb shaft.
-        px=215+110*coords[:,0]
-        py=610-110*(coords[:,1]-.4)
-        flare=np.interp(py,[696,710,720,730,740,750,760,770,790,805,820,830,842,856,873],
-                           [0,1,6,20,35,50,59,60,61,60,51,40,23,11,0])
-        influence=np.clip((px-248)/90,0,1)
-        coords[:,0]+=flare*influence*influence*(3-2*influence)/110
-        # Knit bunches at the flexion lines, particularly on the palmar side.
-        for centers in landmarks.values():
-            for cx,cy in centers[1:3]:
-                offset=py-cy-.16*(px-cx)
-                envelope=np.exp(-((px-cx)/29)**4-(offset/15)**2)
-                coords[:,2]+=.026*np.cos(offset*.50)*envelope*np.tanh(coords[:,2]*7)
-    obj.data.vertices.foreach_set("co",coords.ravel())
-    obj.data.update()
-
-bpy.context.view_layer.objects.active=rig
-rig.select_set(True)
-bpy.ops.object.mode_set(mode="EDIT")
-rest=[(b.name,b.head.copy(),b.tail.copy()) for b in rig.data.edit_bones]
-for name,h,t in rest:
-    bone=rig.data.edit_bones[name]
-    h.xy=warp([h.x,h.y])[0]
-    t.xy=warp([t.x,t.y])[0]
-    bone.head,bone.tail=h,t
-bpy.ops.object.mode_set(mode="OBJECT")
+register_rig(rig)
+sculpt(shell)
+# Shape the knit binding around the same tapered wrist cross section.
+for vertex in cuff.data.vertices:
+    x,y,z=vertex.co
+    t=np.clip((y+2.72)/.66,0,1)
+    width=126+17*t*t
+    vertex.co=((232-215+(x-.04)*width/1.10)/110,
+               (654-949+60*t)/110,(z/.425)*(46+4*t)/110)
+cuff.data.update()
 bpy.context.view_layer.update()
 mesh=shell.data
 mesh.calc_loop_triangles()
@@ -110,13 +60,12 @@ def support(p):
         for g in mesh.vertices[i].groups:
             name=shell.vertex_groups[g.group].name
             weights[name]=weights.get(name,0)+max(fac,0)*g.weight
-    # The component region is locally stiff, with a soft transition into branches.
-    px,py=p
-    board_blend=np.clip((py-570)/57,0,1)*np.clip((437-px)/40,0,1)
-    h=loc.z*(1-board_blend)+max(loc.z,.47)*board_blend+.023
-    weights={k:v*(1-board_blend) for k,v in weights.items()}
-    weights["WristRoot"]=weights.get("WristRoot",0)+board_blend
-    return (float(x),float(y),float(h)),weights
+    # Mount the underside on the same triangle and copy its skin influences.
+    # Keep the small film allowance normal to the shell even on the thumb flank.
+    normal=(b-a).cross(c-a).normalized()
+    if normal.z<0: normal.negate()
+    weights=dict(sorted(weights.items(),key=lambda item:-item[1])[:4])
+    return tuple(loc+normal*.018),weights
 
 image=bpy.data.images.load(str(root/"assets/reference/hsad_fpc_front.png"))
 image.pack()
@@ -208,7 +157,7 @@ for part in parts:
     top=base.copy()
     top[:,2]+=part["height"]
     bottom=base.copy()
-    bottom[:,2]-=.022
+    bottom[:,2]-=.012
     # Pixel Y points down, so correct each triangle's winding in world XY.
     faces=[]
     for a,b,c in part["faces"]:
@@ -279,7 +228,7 @@ for j in range(33):
     t=j/32
     for i,v in enumerate(rim):
         angle=2*np.pi*i/segments
-        radius=.86+.13*t+.038*np.exp(-((t-.37)/.16)**2)*np.cos(2*angle+.4)
+        radius=.79+.16*t+.038*np.exp(-((t-.37)/.16)**2)*np.cos(2*angle+.4)
         radius-=.013*np.exp(-((t-.21-.04*np.sin(angle))/.026)**2)
         point=center+(v-center)*radius
         # The elastic lip takes the shape of the cuff; the exposed forearm
@@ -289,7 +238,7 @@ for j in range(33):
         point[[0,2]]=(1-.75*easing)*point[[0,2]]+.75*easing*(center+ellipse*radius)[[0,2]]
         point[0]-=.10*t
         point[1]+=.14-1.85*t
-        point[2]-=.065*t
+        point[2]-=.028*t
         verts.append(point)
         warmth=.023*np.sin(angle-.7)+.014*np.cos(3*angle+2*t)
         colors.append((.55+warmth,.32+warmth*.6,.225+warmth*.4,1))
@@ -384,7 +333,7 @@ group.add(list(range(len(sleeve_points))),1,"REPLACE")
 sleeve.modifiers.new("Wrist motion","ARMATURE").object=rig
 
 bpy.context.preferences.filepaths.save_version=0
-bpy.data.objects["HSAD_Metadata"]["modelVersion"]="6.1-worn"
+bpy.data.objects["HSAD_Metadata"]["modelVersion"]="7.0-fit"
 bpy.ops.object.select_all(action="SELECT")
 bpy.context.view_layer.objects.active=shell
 bpy.ops.wm.save_as_mainfile(filepath=str(root/"assets/blender/hsad_reference_device.blend"))
