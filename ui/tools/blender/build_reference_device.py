@@ -204,22 +204,44 @@ def anchor(name,point,part=None,bone="WristRoot"):
     if part:obj["hsadPartId"]=part
     return obj
 for name,p,part in [("DeviceRoot",(213,713),"acquisition"),
-        ("SignalConditioning",(170,649),"conditioning"),("PowerManagement",(290,811),"power"),
-        ("FingerFPC",(246,484),"fpc"),("IMUModule",(255,719),"imu"),("BatteryModule",(199,750),"battery")]:
+        ("SignalConditioning",(170,649),"conditioning"),("PowerManagement",(287,812),"power"),
+        ("FingerFPC",(246,484),"fpc"),("IMUModule",(265,683),"imu"),("BatteryModule",(216,796),"battery")]:
     point=list(support(p)[0])
     if part in ("imu","battery"):point[2]-=.15
     anchor(name,point,part)
 
-# Keep the internal components as solids beneath the photographed board.
-for name,dims in [("BatteryModule",(1.22,.80,.12)),("IMUModule",(.35,.30,.07))]:
-    parent=bpy.data.objects[name]
+# The lower-board drawing in Fig. 2-5(b) is mirrored relative to the
+# populated face. Locate its IMU near the fingers and its cell below it.
+tin=material("Solder terminals",(.62,.65,.65),.38,.65)
+ceramic=material("Capacitor ceramic",(.57,.38,.21),.55)
+resistor=material("Resistor coating",(.045,.049,.048),.58)
+module_board=material("JY60 solder mask",(.045,.21,.09),.47)
+cell_seal=material("Cell insulating seal",(.58,.29,.045),.49)
+cell_foil=material("Cell pouch laminate",(.61,.64,.64),.36,.63)
+def internal_box(parent,name,location,dims,mat):
     bpy.ops.mesh.primitive_cube_add(size=1)
     obj=bpy.context.object
-    obj.name=name+"_Internal"
+    obj.name=name
     obj.parent=parent
-    obj.location=(0,0,0)
-    obj.dimensions=dims
-    obj.data.materials.append(edge)
+    obj.location=location
+    for vertex in obj.data.vertices:
+        vertex.co=Vector([v*d for v,d in zip(vertex.co,dims)])
+    obj.data.materials.append(mat)
+    return obj
+
+cad=json.loads((root/"assets/reference/board_placement.json").read_text(encoding="utf8"))
+mil=np.linalg.norm(np.array(cad["photoTransform"])[0])/110
+imu=bpy.data.objects["IMUModule"]
+internal_box(imu,"JY60_PCB",(0,0,0),(600*mil,600*mil,.018),module_board)
+internal_box(imu,"JY60_Shield",(0,0,.021),(465*mil,545*mil,.027),cell_foil)
+for pin,x,y,angle,w,h in cad["pads"]["JY60"]:
+    pad=internal_box(imu,"JY60_Pad_"+pin,(x*mil,y*mil,.014),(w*mil,h*mil,.009),tin)
+    pad.rotation_euler.z=np.deg2rad(angle)
+battery=bpy.data.objects["BatteryModule"]
+internal_box(battery,"Cell_Seal",(0,0,0),(1.05,1.10,.024),cell_seal)
+internal_box(battery,"Cell_Pouch",(0,.015,.016),(.99,.99,.028),cell_foil)
+for side in (-1,1):
+    internal_box(battery,"Cell_Tab_"+str(side),(side*.24,-.59,0),(.13,.16,.012),tin)
 
 from functools import lru_cache
 support= lru_cache(maxsize=None)(support)
@@ -253,6 +275,8 @@ for part in parts:
     obj.location=center
     obj.parent=rig
     obj["hsadPartId"]=kind
+    if part.get("owner"):
+        obj["edaDesignators"]=part["owner"]
     if kind=="sensor":
         for k,val in old_meta[name].items(): obj[k]=val
         bone=obj["boneName"]
@@ -260,6 +284,10 @@ for part in parts:
             a=anchor(tag,center,None,bone)
             a["hsadJointId"]=obj["hsadJointId"]
     mat=shield if name=="ESP32_Shield" else pkg if part["height"] else foil
+    if name.startswith("Pads_"):
+        mat=tin
+    elif name.startswith("RC_"):
+        mat=ceramic if name.endswith("C0402") else resistor
     geo.materials.append(mat)
     geo.materials.append(edge if part["height"] else polyimide)
     uv=geo.uv_layers.new(name="Measured front")
@@ -279,7 +307,7 @@ for part in parts:
     obj.modifiers.new("Surface flexion","ARMATURE").object=rig
 
 bpy.context.preferences.filepaths.save_version=0
-bpy.data.objects["HSAD_Metadata"]["modelVersion"]="5.1-thumb-web"
+bpy.data.objects["HSAD_Metadata"]["modelVersion"]="thumb-inward-eda-assembly"
 bpy.ops.object.select_all(action="SELECT")
 bpy.context.view_layer.objects.active=shell
 bpy.ops.wm.save_as_mainfile(filepath=str(root/"assets/blender/hsad_reference_device.blend"))

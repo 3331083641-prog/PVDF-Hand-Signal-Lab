@@ -81,7 +81,7 @@ export const sensorMetadata = jointHotspots.map((joint) => ({
   anatomicalNodeName: joint.anatomicalNode,
 }))
 
-export type DevicePartId = 'fpc' | 'serpentine' | 'acquisition' | 'battery' | 'esp32' | 'imu' | 'conditioning' | 'sensor' | 'power'
+export type DevicePartId = 'serpentine' | 'acquisition' | 'battery' | 'esp32' | 'imu' | 'conditioning' | 'sensor' | 'power'
 
 export type DevicePart = {
   id: DevicePartId
@@ -94,14 +94,13 @@ export type DevicePart = {
 
 export const deviceParts: DevicePart[] = [
   { id: 'sensor', label: '双层 PVDF 检测单元', description: '同一关节处的两层 PVDF 以相反极性响应，形成一对原始信号。', evidence: '论文图 2-2、图 2-10', nodeNames: ['SensorGroup'] },
-  { id: 'fpc', label: '柔性 FPC', description: '主柔性板与五条指部支路共同承载检测单元和信号走线。', evidence: '论文图 2-3、EDA 柔性板工程', nodeNames: ['MainFPC', 'FingerFPC'] },
   { id: 'serpentine', label: '蛇形柔性走线', description: '关节处的蛇形段为弯曲保留形变余量，使线路随手指自然运动。', evidence: '论文图 2-3、EDA 柔性板工程', nodeNames: ['Serpentine'] },
   { id: 'acquisition', label: '手背采集模块', description: '集中承载采集、控制与无线传输相关电路。', evidence: '论文图 2-5、硬板 EDA 工程', nodeNames: ['DeviceRoot', 'CircuitModule'] },
-  { id: 'conditioning', label: '信号调理区域', description: '电荷放大与调理电路将微弱压电响应转换为可采集电压。', evidence: '论文图 2-5、P1 电荷放大原理图', nodeNames: ['SignalConditioning'] },
+  { id: 'conditioning', label: '信号调理区域', description: 'U1–U7 是七颗四运放，每颗处理四路输入。每组配有 4 个 RF 反馈电阻（0805）、4 个 CF 反馈电容和 4 个输入电阻（均为 0402）。', evidence: '第七版 PCB 实装记录：LM324PWR，TSSOP-14；共 28 路。', nodeNames: ['SignalConditioning'] },
   { id: 'esp32', label: 'ESP32 主控', description: '协调多路采样、数据封装与无线传输。', evidence: '论文图 2-5、ESP32-WROOM-32E 原理图', nodeNames: ['ESP32Module'] },
-  { id: 'imu', label: 'IMU 姿态模块', description: '输出 Pitch、Yaw、Roll 三轴姿态，与 14 个关节角共同完成动作映射。', evidence: '论文系统结构与上位机 31 字段协议', nodeNames: ['IMUModule'] },
-  { id: 'battery', label: '内置电池', description: '为装置提供独立供电，支持无线工作。', evidence: '论文系统架构与电源原理图', nodeNames: ['BatteryModule'] },
-  { id: 'power', label: '电源管理区域', description: '完成电池供电、稳压与充电管理，为采集链提供稳定电源。', evidence: '硬板 EDA 电源与充电管理区域', nodeNames: ['PowerManagement'] },
+  { id: 'imu', label: 'IMU 姿态模块', description: '夹层中的 U41（JY60）测量手部整体姿态。模块两侧各有 6 个焊盘，与手指关节的检测电路独立。', evidence: '第七版柔性板 U41 封装；论文图 2-5(b)。', nodeNames: ['IMUModule'] },
+  { id: 'battery', label: '内置电池', description: '100 mAh 锂电池放在手背双层板之间，通过腕侧的电极焊接区供电。拆解时可看到电池和它在夹层中的位置。', evidence: '论文图 2-5(b) 标注电池放置区和电极区，正文第 22 页给出容量。外形为示意。', nodeNames: ['BatteryModule'] },
+  { id: 'power', label: '电源管理区域', description: 'U26（TP4057-MS）负责锂电池充电，U31（AIC1221-33GY3TR）提供 3.3 V 稳压。Q2（AO3401）和 D8、D9（PMEG3030EP）位于供电通路。', evidence: '第七版 PCB 的 U26、U31、Q2、D8、D9 与 VBAT+、VIN、3.3V 网络。', nodeNames: ['PowerManagement'] },
 ]
 
 /** 返回与给定模型节点相匹配的器件；FingerFPC_*、Serpentine_* 等子节点使用前缀匹配。 */

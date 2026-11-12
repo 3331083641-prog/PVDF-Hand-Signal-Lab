@@ -59,39 +59,45 @@ def package(name, corners, height, kind):
     patch(name,kind,Polygon(corners),height)
 
 
-for i,(x,y) in enumerate([(114,641),(168,644),(221,646),(276,649),(126,698),(182,701),(236,704)]):
-    package("Amplifier_%02d"%(i+1),[(x-9,y-11),(x+9,y-10),(x+9,y+11),(x-9,y+10)],.048,"conditioning")
-    # Isolate the solder terminals along both edges of each package.
-    for side in [-1,1]:
-        for pin in range(6):
-            px,py=x+side*11,y-9+pin*3.5
-            patch(f"Lead_{i}_{side}_{pin}","conditioning",box(px-1.9,py-.9,px+1.9,py+.9),.018)
+# Register bottom-side PCB placements to the photographed U1-U7 centers.
+from shapely.affinity import affine_transform, rotate, scale, translate
+from shapely.ops import unary_union
+cad = json.loads((root / "assets/reference/board_placement.json").read_text(encoding="utf8"))
+ax, ay, origin = cad["photoTransform"]
+registration = [ax[0], ay[0], ax[1], ay[1], *origin]
+passive_groups = {}
+pad_groups = {}
+body_mm = {"TSSOP-14": (5,4.4), "R0805": (2,1.25), "R0402": (1,.5), "C0402": (1,.5),
+           "SOT-23-6": (2.9,1.6), "SOT-223": (3.5,6.5), "SOT-23-3": (1.4,2.9),
+           "SOD-128": (3.7,2.5), "LED0402-R-RD": (1,.5)}
+def rectangle(width, height):
+    return box(-width/2, -height/2, width/2, height/2)
+
+for ref, group, device, footprint, x, y, angle in cad["placement"]:
+    kind = "power" if group == "power" else "conditioning"
+    family = footprint.split("_")[0]
+    width, height = body_mm[family]
+    def photo(shape):
+        bottom = rotate(scale(shape, 1, -1, origin=(0,0)), angle, origin=(0,0))
+        return affine_transform(translate(bottom, x, y), registration)
+    body = photo(rectangle(width/.0254, height/.0254))
+    if family in ("R0805","R0402","C0402"):
+        passive_groups.setdefault((group, family, kind), []).append((ref, body))
+    else:
+        patch(f"Package_{ref}", kind, body, .048, ref)
+    terminals = pad_groups.setdefault((group, kind), [])
+    for pin, px, py, rotation, w, h in cad["pads"][footprint]:
+        terminal = translate(rotate(rectangle(w,h), rotation, origin=(0,0)), px, py)
+        terminals.append(photo(terminal))
+for (group, family, kind), members in passive_groups.items():
+    patch(f"RC_{group}_{family}", kind, unary_union([poly for _,poly in members]), .021,
+          ",".join(ref for ref,_ in members))
+for (group,kind), terminals in pad_groups.items():
+    patch(f"Pads_{group}",kind,unary_union(terminals),.012,group)
 
 package("ESP32_Shield",[(154,751),(217,756),(214,832),(151,826)],.093,"esp32")
 package("ESP32Module",[(147,745),(229,749),(224,863),(145,859)],.036,"esp32")
-for i,(x,y,w,h) in enumerate([(100,745,10,18),(130,747,11,16),(122,774,17,21),(262,783,10,19),
-        (261,810,10,18),(249,845,23,15),(285,846,12,23),(297,776,17,9),(295,814,18,10)]):
-    patch("PowerPackage_%02d"%i,"power",box(x-w/2,y-h/2,x+w/2,y+h/2),.040)
 
-# Use the low-saturation component bodies in the populated regions of the
-# photograph to pick up the small passives and solder islands around the ICs.
-hsv=cv2.cvtColor(image[:,:,:3],cv2.COLOR_BGR2HSV)
-populated=np.zeros(mask.shape,np.uint8)
-for x,y in [(114,641),(168,644),(221,646),(276,649),(126,698),(182,701),(236,704)]:
-    cv2.rectangle(populated,(x-22,y-22),(x+22,y+23),1,-1)
-cv2.fillPoly(populated,[np.int32([(88,731),(141,736),(142,849),(118,846),(85,779)])],1)
-cv2.fillPoly(populated,[np.int32([(235,765),(319,767),(325,869),(234,866)])],1)
-found,_=cv2.findContours(((hsv[:,:,1]<87)*populated).astype("uint8"),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
-passives={"conditioning":[],"power":[]}
-for contour in found:
-    x,y,w,h=cv2.boundingRect(contour)
-    if 3<=w<=14 and 2<=h<=10 and 5<=cv2.contourArea(contour)<=75:
-        hull=cv2.convexHull(contour)[:,0,:]
-        if len(hull)>=3:
-            passives["conditioning" if y<732 else "power"].append(Polygon(hull))
-from shapely.ops import unary_union
-for kind,items in passives.items():
-    patch("SMD_"+kind,kind,unary_union(items),.017)
 # Cut each pad at its actual neck. The rest of each branch is the die-cut meander.
 fingers = {
     "L":([(73,516),(73,357),(71,253)],[(55,58),(48,49),(60,35)],(0,-1),box(40,65,110,597)),
@@ -125,17 +131,5 @@ for info in patches:
             edges[pair]=edges.get(pair,0)+1
     info["sides"]=[pair for pair,count in edges.items() if count==1 and
         (info["height"] or outer.distance(Point(pts[list(pair)].mean(axis=0)))<.02)]
-# Batch the individual pins by package so browser draw calls scale with ICs.
-batched={}
-for part in patches:
-    if not part["name"].startswith("Lead_"):
-        batched[part["name"]]=part
-        continue
-    key="_".join(part["name"].split("_")[:2])+"_Terminals"
-    dest=batched.setdefault(key,{**part,"name":key,"points":[],"faces":[],"sides":[]})
-    offset=len(dest["points"])
-    dest["points"].extend(part["points"])
-    for field in ("faces","sides"):
-        dest[field].extend([[v+offset for v in row] for row in part[field]])
-Path(sys.argv[1]).write_text(json.dumps(list(batched.values()),separators=(",",":")),encoding="utf8")
+Path(sys.argv[1]).write_text(json.dumps(patches,separators=(",",":")),encoding="utf8")
 print("Patches:",len(patches),"outline area in square pixels:",round(outline.area))

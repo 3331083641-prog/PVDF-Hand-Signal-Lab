@@ -1,5 +1,5 @@
 import { Canvas, type ThreeEvent, useFrame, useLoader, useThree } from '@react-three/fiber'
-import { Component, Suspense, useEffect, useId, useMemo, useRef, type ReactNode, type RefObject } from 'react'
+import { Component, Suspense, useEffect, useId, useMemo, useRef, type ReactNode } from 'react'
 import * as THREE from 'three'
 import { DRACOLoader, GLTFLoader, OrbitControls, SkeletonUtils, type GLTF } from 'three-stdlib'
 import {
@@ -10,10 +10,11 @@ import {
   type JointId,
 } from '../../data/jointHotspots'
 import type { JointAngles } from '../../data/mappingPresets'
+import { DeviceAssembly } from './DeviceAssembly'
 
 // Keep both teaching pages on the same reviewed asset. The revision query
 // prevents a browser from reusing the pre-correction GLB after deployment.
-export const HSAD_MODEL_URL = `${import.meta.env.BASE_URL}models/hsad/hsad_reference_device.glb?rev=thumb-inward-b6634c0`
+export const HSAD_MODEL_URL = `${import.meta.env.BASE_URL}models/hsad/hsad_reference_device.glb?rev=thumb-inward-eda-assembly`
 
 export type HSADSelection = { type: 'joint' | 'part'; id: string }
 export type HSADSelectionEvent = HSADSelection & { clientX: number; clientY: number }
@@ -27,6 +28,8 @@ type HandProps = {
   onSelect?: (selection: HSADSelectionEvent) => void
   resetNonce?: number
   presentation?: 'device' | 'mapping'
+  lifted?: boolean
+  expanded?: boolean
   className?: string
 }
 
@@ -103,15 +106,10 @@ function validateModelSchema(scene: THREE.Object3D) {
   if (missing.length) throw new Error(`HSAD teaching model schema mismatch: ${missing.join(', ')}`)
 }
 
-type MarkerRef = RefObject<HTMLSpanElement | null>
-
-function ModelControls({ targetObject, focusKey = '', resetNonce = 0, device, marker }: { targetObject?: THREE.Object3D; focusKey?: string; resetNonce?: number; device: boolean; marker: MarkerRef }) {
+function ModelControls({ targetObject, focusKey = '', resetNonce = 0, inspecting = false, expanded = false }: { targetObject?: THREE.Object3D; focusKey?: string; resetNonce?: number; inspecting?: boolean; expanded?: boolean }) {
   const { camera, gl, size } = useThree()
   const controls = useRef<OrbitControls | null>(null)
   const previousFocusKey = useRef(focusKey)
-  const flight = useRef<{ target: THREE.Vector3; eye: THREE.Vector3 } | null>(null)
-  const projected = useMemo(() => new THREE.Vector3(), [])
-  const reduced = useMemo(() => matchMedia('(prefers-reduced-motion: reduce)'), [])
 
   useEffect(() => {
     const instance = new OrbitControls(camera, gl.domElement)
@@ -123,7 +121,6 @@ function ModelControls({ targetObject, focusKey = '', resetNonce = 0, device, ma
     instance.minPolarAngle = Math.PI * 0.12
     instance.maxPolarAngle = Math.PI * 0.82
     instance.target.set(0, 0, 0)
-    instance.addEventListener('start', () => { flight.current = null })
     controls.current = instance
     return () => instance.dispose()
   }, [camera, gl])
@@ -131,15 +128,15 @@ function ModelControls({ targetObject, focusKey = '', resetNonce = 0, device, ma
   useEffect(() => {
     const instance = controls.current
     if (!instance) return
-    flight.current = null
     // Leave room for the extended thumb on the narrow laboratory canvas.
     const aspect = size.width / Math.max(1, size.height)
-    const distance = Math.max(9.6, 6.8 / Math.max(0.25, aspect))
+    const distance = expanded ? Math.max(12.6, 10 / Math.max(.25, aspect)) : Math.max(9.6, 6.8 / Math.max(0.25, aspect))
     instance.maxDistance = Math.max(13, distance * 1.4)
-    instance.target.set(0, 0, 0)
+    instance.target.set(expanded ? -.3 : 0, expanded ? -.4 : 0, 0)
     camera.position.set(0.03, 0.02, 1).normalize().multiplyScalar(distance)
+    camera.position.add(instance.target)
     instance.update()
-  }, [camera, resetNonce, size.width, size.height])
+  }, [camera, resetNonce, size.width, size.height, expanded])
 
   useEffect(() => {
     const instance = controls.current
@@ -149,53 +146,24 @@ function ModelControls({ targetObject, focusKey = '', resetNonce = 0, device, ma
     targetObject.getWorldPosition(target)
     const previousTarget = instance.target.clone()
     const direction = camera.position.clone().sub(previousTarget).normalize()
-    if (device) {
-      const destination = previousTarget.lerp(target, 0.72)
-      const distance = Math.min(camera.position.distanceTo(instance.target), 7.4)
-      flight.current = { target: destination, eye: destination.clone().addScaledVector(direction, distance) }
-      return
-    }
-    instance.target.lerp(target, 0.8)
-    camera.position.copy(target.clone().add(direction.multiplyScalar(5.3)))
+    instance.target.lerp(target, inspecting ? 1 : 0.8)
+    const distance = inspecting ? Math.max(8.1, 6.4 * size.height / Math.max(1, size.width)) : 5.3
+    camera.position.copy(target.clone().add(direction.multiplyScalar(distance)))
     instance.update()
-  }, [camera, focusKey, targetObject, device])
+  }, [camera, focusKey, targetObject, inspecting, size.width, size.height])
 
-  useFrame((_, dt) => {
-    const instance = controls.current
-    if (!instance) return
-    const next = flight.current
-    if (next) {
-      const alpha = reduced.matches ? 1 : 1 - Math.exp(-16 * dt)
-      camera.position.lerp(next.eye, alpha)
-      instance.target.lerp(next.target, alpha)
-      if (camera.position.distanceToSquared(next.eye) + instance.target.distanceToSquared(next.target) < 1e-7) flight.current = null
-    }
-    instance.update()
-    const label = marker.current
-    if (label && targetObject) {
-      camera.updateMatrixWorld()
-      targetObject.getWorldPosition(projected).project(camera)
-      const x = Math.round((1 + projected.x) * size.width / 2)
-      const y = Math.round((1 - projected.y) * size.height / 2)
-      const transform = `translate(${x}px, ${y}px)`
-      if (label.style.transform !== transform) {
-        label.style.transform = transform
-        label.classList.toggle('align-left', x > size.width - 54)
-      }
-      const hidden = Math.abs(projected.z) > 1 || x < 0 || y < 0 || x > size.width || y > size.height
-      if (label.hidden !== hidden) label.hidden = hidden
-    }
-  })
+  useFrame(() => controls.current?.update())
   return null
 }
 
-function LoadedHand({ angles, pitch = 0, yaw = 0, roll = 0, selected, onSelect, resetNonce, presentation, marker }: HandProps & { marker: MarkerRef }) {
+function LoadedHand({ angles, pitch = 0, yaw = 0, roll = 0, selected, onSelect, resetNonce, presentation, lifted = false, expanded = false }: HandProps) {
   const gltf = useLoader(GLTFLoader, HSAD_MODEL_URL, (loader) => {
     const draco = new DRACOLoader()
     draco.setDecoderPath(`${import.meta.env.BASE_URL}draco/`)
     loader.setDRACOLoader(draco)
   }) as GLTF
   const root = useRef<THREE.Group>(null)
+  const inspectionFocus = useMemo(() => new THREE.Object3D(), [])
   const pointerStart = useRef<{ x: number; y: number; pointerId: number } | null>(null)
   const scene = useMemo(() => {
     const cloned = SkeletonUtils.clone(gltf.scene)
@@ -337,7 +305,9 @@ function LoadedHand({ angles, pitch = 0, yaw = 0, roll = 0, selected, onSelect, 
         <primitive object={scene} />
       </group>
     </group>
-    <ModelControls targetObject={selectedObject} focusKey={selected ? `${selected.type}:${selected.id}` : ''} resetNonce={resetNonce} device={presentation === 'device'} marker={marker} />
+    {presentation === 'device' && <DeviceAssembly model={scene} active={lifted ? selected : null} expanded={expanded} resolve={resolveSelection} focus={inspectionFocus} />}
+    <ModelControls targetObject={presentation === 'device' ? (lifted && !expanded ? inspectionFocus : undefined) : selectedObject}
+      focusKey={selected ? `${selected.type}:${selected.id}${presentation === 'device' ? ':' + lifted + ':' + resetNonce : ''}` : ''} resetNonce={resetNonce} inspecting={presentation === 'device'} expanded={expanded} />
   </>
 }
 
@@ -353,7 +323,6 @@ class ModelBoundary extends Component<{ children: ReactNode }, { failed: boolean
 
 export function HSADHand3D(props: HandProps) {
   const descriptionId = useId()
-  const marker = useRef<HTMLSpanElement>(null)
   return <div className={`hsad-hand-canvas ${props.className ?? ''}`} role="group" aria-label="可环绕查看并控制十四个关节的完整 HSAD 三维手" aria-describedby={descriptionId}>
     <span id={descriptionId} className="sr-only">深色柔性手套上覆盖橙黄色柔性 FPC、十四个检测单元与手背采集模块。三维舞台支持鼠标旋转缩放；所有关节选择和角度设置也可通过舞台旁的表单控件完成。</span>
     <ModelBoundary>
@@ -363,10 +332,9 @@ export function HSADHand3D(props: HandProps) {
           <directionalLight position={[-4, 7, 6]} intensity={2.15} />
           <directionalLight position={[4, 2, -3]} intensity={1.7} color="#c6edf0" />
           <pointLight position={[-3, -1, 3]} intensity={0.7} color="#f0a321" />
-          <LoadedHand {...props} marker={marker} />
+          <LoadedHand {...props} />
         </Canvas>
       </Suspense>
     </ModelBoundary>
-    {props.presentation === 'device' && props.selected?.type === 'joint' && <span ref={marker} hidden className="device-anchor" aria-hidden="true"><i />{props.selected.id}</span>}
   </div>
 }
