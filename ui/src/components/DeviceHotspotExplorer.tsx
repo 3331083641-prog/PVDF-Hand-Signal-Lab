@@ -14,12 +14,6 @@ export function DeviceHotspotExplorer() {
   const [playing, setPlaying] = useState(mode === 'teacher')
   const [resetNonce, setResetNonce] = useState(0)
   const [popover, setPopover] = useState({ x: 76, y: 34 })
-  const card = useRef<HTMLElement>(null)
-  useEffect(() => {
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return
-    const fade = card.current?.animate([{ opacity: .72, translate: '0 3px' }, { opacity: 1, translate: '0 0' }], { duration: 160, easing: 'ease-out' })
-    return () => fade?.cancel()
-  }, [selected.type, selected.id])
   const options = category === 'joint' ? jointHotspots : deviceParts
   const index = Math.max(0, options.findIndex((item) => item.id === selected.id))
   const joint = useMemo(() => selected.type === 'joint' ? jointHotspots.find((item) => item.id === selected.id) : undefined, [selected])
@@ -67,7 +61,7 @@ export function DeviceHotspotExplorer() {
 
       <HSADHand3D angles={defaultJointAngles} presentation="device" selected={selected} onSelect={selectFromModel} resetNonce={resetNonce} />
 
-      <aside ref={card} className="device-popover" style={{ left: `${popover.x}%`, top: `${popover.y}%` }} aria-live="polite">
+      <aside className="device-popover" style={{ left: `${popover.x}%`, top: `${popover.y}%` }} aria-live="polite">
         <span className="popover-eyebrow"><Focus size={14} />{joint ? `检测单元 ${joint.channel}` : '装置器件'}</span>
         <strong>{joint?.label ?? part?.label}</strong>
         <p>{joint?.role ?? part?.description}</p>

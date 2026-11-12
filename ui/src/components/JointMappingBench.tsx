@@ -160,7 +160,7 @@ export function JointMappingBench() {
     <div className="bench-model-panel">
       <div className="model-panel-head"><div><span>动作映射</span><strong>完整 HSAD 三维手</strong></div><button onClick={() => setResetNonce((value) => value + 1)}><RotateCcw size={16} />复位视角</button></div>
       <HSADHand3D angles={stageAngles} pitch={stageOrientation.pitch} yaw={stageOrientation.yaw} roll={stageOrientation.roll} selected={{ type: 'joint', id: selectedId }} onSelect={modelSelect} resetNonce={resetNonce} presentation="mapping" />
-      <div className="mapping-status" data-phase={metrics.phase}><span><i />{metrics.phase}</span><small>{source === 'serial' ? '串口映射' : '目标轨迹'} {physicalAngle.toFixed(1)}° · {formatV(metrics.currentDifferential)}</small><strong>{selected.shortLabel}</strong><output>{mappedAngle.toFixed(1)}°</output></div>
+      <div className="mapping-status"><span><i />{metrics.phase}</span><small>{source === 'serial' ? '串口映射' : '目标轨迹'} {physicalAngle.toFixed(1)}° · {formatV(metrics.currentDifferential)}</small><strong>{selected.shortLabel}</strong><output>{mappedAngle.toFixed(1)}°</output></div>
     </div>
 
     <aside className="bench-control-panel">
