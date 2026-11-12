@@ -26,22 +26,114 @@ def xy(uv):
     return (np.asarray(uv)-[215,610])*[1/110,-1/110]+[0,.40]
 
 
-sys.path.insert(0,str(Path(__file__).resolve().parent))
-from fit_worn_hand import register_rig, sculpt
+# Register the support and joint axes to the photo, rather than stretching the circuit.
+landmarks = {
+ "Index": [(343,523),(359,321),(370,202),(375,111)],
+ "Middle":[(246,507),(258,283),(265,165),(269,72)],
+ "Ring":  [(155,518),(155,305),(156,190),(156,102)],
+ "Little":[(73,537),(73,369),(71,263),(69,182)],
+ "Thumb": [(408,765),(509,670),(619,530),(688,442)],
+}
+source, target = [],[]
+for finger, pixels in landmarks.items():
+    suffixes = ("CMC","MCP","IP") if finger=="Thumb" else ("MCP","PIP","DIP")
+    chain = [rig.data.bones[f"{finger}_{s}"] for s in suffixes]
+    source += [list(b.head_local)[:2] for b in chain]+[list(chain[-1].tail_local)[:2]]
+    target += list(xy(pixels))
+for coord, pixel in [((-.9,-2.65),(118,908)),((1,-2.65),(358,908)),((0,-1.5),(219,812)),
+    ((-1.23,-1.1),(49,779)),((1.38,-.92),(396,754)),((0,.1),(218,641)),
+    ((-1.41,.15),(43,636)),((1.42,.18),(386,632))]:
+    source.append(coord)
+    target.append(xy(pixel))
+src=np.array(source)
+def radial(p):
+    d=np.sum((p[:,None,:]-src[None,:,:])**2,axis=2)
+    return d*np.log(np.maximum(d,1e-16))
+aff=np.column_stack([np.ones(len(src)),src])
+coef=np.linalg.solve(np.block([[radial(src),aff],[aff.T,np.zeros((3,3))]]),
+                     np.vstack([target,np.zeros((3,2))]))
+def warp(points):
+    p=np.atleast_2d(points)
+    return np.column_stack([radial(p),np.ones(len(p)),p])@coef
 
-pad_bones={p["name"]:old_meta[p["name"]]["boneName"] for p in parts if p["kind"]=="sensor"}
-register_rig(rig,pad_bones)
-sculpt(shell,{pad_bones[p["name"]]:p for p in parts if p["kind"]=="sensor"})
-# Shape the knit binding around the same tapered wrist cross section.
-for vertex in cuff.data.vertices:
-    x,y,z=vertex.co
-    t=np.clip((y+2.72)/.66,0,1)
-    width=126+17*t*t
-    vertex.co=((232-215+(x-.04)*width/1.10)/110,
-               (654-949+60*t)/110,(z/.425)*(46+4*t)/110)
-cuff.data.update()
+for obj in (shell,cuff):
+    coords=np.zeros(len(obj.data.vertices)*3,dtype=np.float32)
+    obj.data.vertices.foreach_get("co",coords)
+    coords=coords.reshape((-1,3))
+    coords[:,:2]=warp(coords[:,:2])
+    if obj == shell:
+        # The photographed board wraps the heel of the thumb. Add the thenar
+        # volume beneath this flare, fading it into the wrist and thumb shaft.
+        px=215+110*coords[:,0]
+        py=610-110*(coords[:,1]-.4)
+        flare=np.interp(py,[696,710,720,730,740,750,760,770,790,805,820,830,842,856,873],
+                           [0,1,6,20,35,50,59,60,61,60,51,40,23,11,0])
+        # Support the outer turn of the root meander on the thenar heel.
+        flare+=16*np.exp(-((py-759)/34)**2)
+        influence=np.clip((px-248)/90,0,1)
+        coords[:,0]+=flare*influence*influence*(3-2*influence)/110
+    obj.data.vertices.foreach_set("co",coords.ravel())
+    obj.data.update()
+
+bpy.context.view_layer.objects.active=rig
+rig.select_set(True)
+bpy.ops.object.mode_set(mode="EDIT")
+rest=[(b.name,b.head.copy(),b.tail.copy()) for b in rig.data.edit_bones]
+for name,h,t in rest:
+    bone=rig.data.edit_bones[name]
+    h.xy=warp([h.x,h.y])[0]
+    t.xy=warp([t.x,t.y])[0]
+    bone.head,bone.tail=h,t
+bpy.ops.object.mode_set(mode="OBJECT")
 bpy.context.view_layer.update()
 mesh=shell.data
+# Rebind the thumb in the registered (photographic) rest space. The old
+# nearest-chain weights were calculated before the thin-plate warp.
+def smooth_band(value, start, end):
+    t=np.clip((value-start)/(end-start),0,1)
+    return t*t*(3-2*t)
+
+def bind_thumb_web():
+    xyz=np.array([v.co[:] for v in mesh.vertices])
+    uv=xyz[:,:2]*[110,-110]+[215,654]
+    joints=np.array(landmarks["Thumb"],dtype=float)
+    axes=np.diff(joints,axis=0)
+    lengths=np.linalg.norm(axes,axis=1)
+    axes/=lengths[:,None]
+    # Signed distance along each joint's local bisector varies continuously
+    # across the thickness of the web and both sides of the MCP.
+    tangent=axes[:-1]+axes[1:]
+    tangent/=np.linalg.norm(tangent,axis=1)[:,None]
+    along=(uv-joints[0])@axes[0]
+    mcp=(uv-joints[1])@tangent[0]
+    ip=(uv-joints[2])@tangent[1]
+    distances=[]
+    for start,axis,length in zip(joints,axes,lengths):
+        d=uv-start
+        distances.append(np.linalg.norm(d-np.clip(d@axis,0,length)[:,None]*axis,axis=1))
+    radius=np.min(distances,axis=0)
+    thumb=smooth_band(along,-88,40)*(1-smooth_band(radius,57,145))
+    bend=smooth_band(mcp,-76,76)
+    distal=smooth_band(ip,-55,55)
+    names=("Thumb_CMC","Thumb_MCP","Thumb_IP")
+    ids=[shell.vertex_groups[n].index for n in names]
+    root_id=shell.vertex_groups["WristRoot"].index
+    for v in mesh.vertices:
+        idx=v.index
+        old={g.group:g.weight for g in v.groups}
+        if thumb[idx]<1e-7 and not any(g in old for g in ids): continue
+        other={k:w for k,w in old.items() if k not in ids}
+        # Fade the original non-thumb weights into the palm at the radial edge.
+        # A former exclusively thumb-bound vertex requires a palm fallback.
+        other[root_id]=other.get(root_id,0)+sum(old.get(k,0) for k in ids)
+        weights={k:w*(1-thumb[idx]) for k,w in other.items()}
+        weights.update(zip(ids,thumb[idx]*np.array([1-bend[idx],bend[idx]*(1-distal[idx]),bend[idx]*distal[idx]])))
+        keep=sorted(weights.items(),key=lambda item:-item[1])[:4]
+        total=sum(w for _,w in keep)
+        for k in old: shell.vertex_groups[k].remove([idx])
+        for k,w in keep:
+            if w>1e-7: shell.vertex_groups[k].add([idx],float(w/total),"REPLACE")
+bind_thumb_web()
 mesh.calc_loop_triangles()
 coords=[v.co.copy() for v in mesh.vertices]
 triangles=[list(t.vertices) for t in mesh.loop_triangles]
@@ -61,12 +153,19 @@ def support(p):
         for g in mesh.vertices[i].groups:
             name=shell.vertex_groups[g.group].name
             weights[name]=weights.get(name,0)+max(fac,0)*g.weight
-    # Mount the underside on the same triangle and copy its skin influences.
-    # Keep the small film allowance normal to the shell even on the thumb flank.
-    normal=(b-a).cross(c-a).normalized()
-    if normal.z<0: normal.negate()
-    weights=dict(sorted(weights.items(),key=lambda item:-item[1])[:4])
-    return tuple(loc+normal*.015),weights
+    # The component region is locally stiff, with a soft transition into branches.
+    px,py=p
+    board_blend=np.clip((py-570)/57,0,1)*np.clip((437-px)/40,0,1)
+    # At the thumb take-off, use the actual hit (also on the curved
+    # flank) so the branch and the board share the same mounting surface.
+    thumb_side=smooth_band(px,363,415)
+    board_blend*=1-thumb_side
+    x+=thumb_side*(loc.x-x)
+    y+=thumb_side*(loc.y-y)
+    h=loc.z*(1-board_blend)+max(loc.z,.47)*board_blend+.023
+    weights={k:v*(1-board_blend) for k,v in weights.items()}
+    weights["WristRoot"]=weights.get("WristRoot",0)+board_blend
+    return (float(x),float(y),float(h)),weights
 
 image=bpy.data.images.load(str(root/"assets/reference/hsad_fpc_front.png"))
 image.pack()
@@ -101,13 +200,13 @@ def anchor(name,point,part=None,bone="WristRoot"):
     return obj
 for name,p,part in [("DeviceRoot",(213,713),"acquisition"),
         ("SignalConditioning",(170,649),"conditioning"),("PowerManagement",(290,811),"power"),
-        ("FingerFPC",(246,484),"fpc"),("IMUModule",(254,653),"imu"),("BatteryModule",(200,781),"battery")]:
+        ("FingerFPC",(246,484),"fpc"),("IMUModule",(255,719),"imu"),("BatteryModule",(199,750),"battery")]:
     point=list(support(p)[0])
     if part in ("imu","battery"):point[2]-=.15
     anchor(name,point,part)
 
 # Keep the internal components as solids beneath the photographed board.
-for name,dims in [("BatteryModule",(1.23,1.03,.085)),("IMUModule",(.51,.45,.065))]:
+for name,dims in [("BatteryModule",(1.22,.80,.12)),("IMUModule",(.35,.30,.07))]:
     parent=bpy.data.objects[name]
     bpy.ops.mesh.primitive_cube_add(size=1)
     obj=bpy.context.object
@@ -115,59 +214,11 @@ for name,dims in [("BatteryModule",(1.23,1.03,.085)),("IMUModule",(.51,.45,.065)
     obj.parent=parent
     obj.location=(0,0,0)
     obj.dimensions=dims
-    interior = material(name+" housing",(.39,.38,.32) if name=="BatteryModule" else (.024,.13,.095),.48)
-    obj.data.materials.append(interior)
-    bpy.ops.object.transform_apply(location=False,rotation=False,scale=True)
-    bevel=obj.modifiers.new("Folded edge","BEVEL")
-    bevel.width=.024
-    bevel.segments=3
-
-# Schematic internal packages. Figure 2-5b supplies the layer and footprint.
-def internal_detail(parent, name, offset, dimensions, mat):
-    bpy.ops.mesh.primitive_cube_add(size=1)
-    detail=bpy.context.object
-    detail.name=name
-    detail.parent=parent
-    detail.location=offset
-    detail.dimensions=dimensions
-    detail.data.materials.append(mat)
-    bpy.ops.object.transform_apply(location=False,rotation=False,scale=True)
-    bevel=detail.modifiers.new("Finished edge","BEVEL")
-    bevel.width=min(dimensions)*.18
-    bevel.segments=2
-
-tin=material("Tinned terminals",(.52,.56,.53),.37,.48)
-imu=bpy.data.objects["IMUModule"]
-internal_detail(imu,"IMU_Package",(0,0,.043),(.34,.33,.032),tin)
-for side in (-1,1):
-    for pin in range(5):
-        internal_detail(imu,f"IMU_Contact_{side}_{pin}",(side*.22,(pin-2)*.076,.037),(.043,.036,.012),tin)
-battery=bpy.data.objects["BatteryModule"]
-internal_detail(battery,"Cell_laminate",(0,0,.045),(1.14,.94,.035),tin)
-for side in (-1,1):
-    internal_detail(battery,f"Cell_tab_{side}",(side*.26,-.55,0),(.14,.16,.018),tin)
+    obj.data.materials.append(edge)
 
 from functools import lru_cache
 support= lru_cache(maxsize=None)(support)
-def refine_surface(part):
-    # Adjacent parts use identical edge midpoints, including along pad necks.
-    points=list(part["points"])
-    midpoints={}
-    def mid(a,b):
-        key=tuple(sorted((a,b)))
-        if key not in midpoints:
-            midpoints[key]=len(points)
-            points.append([(x+y)/2 for x,y in zip(points[a],points[b])])
-        return midpoints[key]
-    faces=[]
-    for a,b,c in part["faces"]:
-        u,v,w=mid(a,b),mid(b,c),mid(c,a)
-        faces.extend([(a,u,w),(u,b,v),(w,v,c),(u,v,w)])
-    sides=[tuple(sorted(edge)) for a,b in part["sides"] for edge in ((a,mid(a,b)),(mid(a,b),b))]
-    return {**part,"points":points,"faces":faces,"sides":sides}
-
 for part in parts:
-    part=refine_surface(part)
     name,kind=part["name"],part["kind"]
     pixels=[tuple(p) for p in part["points"]]
     records=[support(p) for p in pixels]
@@ -176,7 +227,7 @@ for part in parts:
     top=base.copy()
     top[:,2]+=part["height"]
     bottom=base.copy()
-    bottom[:,2]-=.012
+    bottom[:,2]-=.022
     # Pixel Y points down, so correct each triangle's winding in world XY.
     faces=[]
     for a,b,c in part["faces"]:
@@ -199,7 +250,7 @@ for part in parts:
     obj["hsadPartId"]=kind
     if kind=="sensor":
         for k,val in old_meta[name].items(): obj[k]=val
-        bone="Mount_"+obj["boneName"]
+        bone=obj["boneName"]
         for tag in (obj["anatomicalNodeName"],"Highlight_"+obj["hsadJointId"]):
             a=anchor(tag,center,None,bone)
             a["hsadJointId"]=obj["hsadJointId"]
@@ -215,7 +266,6 @@ for part in parts:
             uv.data[li].uv=((px+.5)/image.size[0],1-(py+.5)/image.size[1])
     groups={}
     for i,(_,weights) in enumerate(records):
-        if kind=="sensor": weights={"Mount_"+pad_bones[name]:1.0}
         total=sum(weights.values())
         for bone,v in weights.items():
             if v<1e-6:continue
@@ -223,137 +273,8 @@ for part in parts:
             groups[bone].add([i,i+count],v/total,"REPLACE")
     obj.modifiers.new("Surface flexion","ARMATURE").object=rig
 
-# Anchor each overview label on a triangle of the actual photographic surface.
-# The selected triangle lies inside the meander even where its bounding box is empty.
-for kind,name,pixel in [
-    ("sensor","Sensor_M2",(258,270)), ("fpc","MainFPC",(338,718)),
-    ("serpentine","Serpentine_M",(250,381)), ("acquisition","CircuitModule",(224,733)),
-    ("conditioning","Amplifier_02",(168,644)), ("esp32","ESP32_Shield",(184,788)),
-    ("power","PowerPackage_07",(297,776)), ("mux","MuxPackage_03",(262,783)),
-    ("serial","SerialPackage_02",(122,774))]:
-    part=next(part for part in parts if part["name"]==name)
-    pts=np.array(part["points"])[part["faces"]].mean(axis=1)
-    uv=pts[np.argmin(np.linalg.norm(pts-pixel,axis=1))]
-    point,weights=support(tuple(uv))
-    point=list(point)
-    point[2]+=part["height"]+.006
-    anchor("Guide_"+kind,point,kind,max(weights,key=weights.get))
-
-# Extend a wrist from the inside lip of the cuff, using its actual registered rim.
-rim=np.array([list(cuff.data.vertices[i].co) for i in range(0,288,3)])
-center=rim.mean(axis=0)
-verts=[]; faces=[]; colors=[]
-segments=len(rim)
-for j in range(33):
-    t=j/32
-    for i,v in enumerate(rim):
-        angle=2*np.pi*i/segments
-        radius=.79+.16*t+.038*np.exp(-((t-.37)/.16)**2)*np.cos(2*angle+.4)
-        radius-=.013*np.exp(-((t-.21-.04*np.sin(angle))/.026)**2)
-        point=center+(v-center)*radius
-        # The elastic lip takes the shape of the cuff; the exposed forearm
-        # transitions to an oval with a slight ulnar prominence.
-        ellipse=np.array([1.0*np.cos(angle),0,.44*np.sin(angle)])
-        easing=t*t*(3-2*t)
-        point[[0,2]]=(1-.75*easing)*point[[0,2]]+.75*easing*(center+ellipse*radius)[[0,2]]
-        point[0]-=.10*t
-        point[1]+=.14-1.85*t
-        point[2]-=.028*t
-        verts.append(point)
-        warmth=.023*np.sin(angle-.7)+.014*np.cos(3*angle+2*t)
-        colors.append((.55+warmth,.32+warmth*.6,.225+warmth*.4,1))
-        if j:
-            a=(j-1)*segments+i; b=(j-1)*segments+(i+1)%segments
-            faces.append((a,a+segments,b+segments,b))
-faces.append(tuple(range(32*segments,33*segments)))
-geo=bpy.data.meshes.new("Wearer wrist")
-geo.from_pydata(verts,[],faces)
-import bmesh
-bm=bmesh.new(); bm.from_mesh(geo)
-bmesh.ops.recalc_face_normals(bm,faces=list(bm.faces))
-bm.to_mesh(geo); bm.free()
-wrist=bpy.data.objects.new("Wearer_Wrist",geo)
-bpy.context.collection.objects.link(wrist)
-skin=material("Skin at cuff",(.55,.32,.225),.68)
-tint=geo.color_attributes.new(name="Skin tone",type="FLOAT_COLOR",domain="POINT")
-tint.data.foreach_set("color",np.array(colors,dtype=np.float32).ravel())
-attr=skin.node_tree.nodes.new("ShaderNodeVertexColor")
-attr.layer_name=tint.name
-skin.node_tree.links.new(attr.outputs["Color"],skin.node_tree.nodes["Principled BSDF"].inputs["Base Color"])
-# Map the skin around the circumference with a UV seam on the underside.
-uv=geo.uv_layers.new(name="Wrist surface")
-for poly in geo.polygons:
-    columns=[geo.loops[li].vertex_index%segments for li in poly.loop_indices]
-    seam=min(columns)==0 and max(columns)==segments-1
-    for li in poly.loop_indices:
-        row,col=divmod(geo.loops[li].vertex_index,segments)
-        uv.data[li].uv=((segments if seam and col==0 else col)/segments,row/32)
-
-# Pack a fine relief map for pores and shallow transverse wrist folds.
-rng=np.random.default_rng(319)
-ny,nx=256,768
-v,u=np.mgrid[0:ny,0:nx]/np.array([ny,nx])[:,None,None]
-height=rng.normal(0,.035,(ny,nx))
-for depth,level in [(.14,.21),(.10,.31),(.055,.64)]:
-    fold=v-level-.045*np.sin(2*np.pi*u+.3)-.018*np.sin(4*np.pi*u)
-    height-=depth*np.exp(-(fold/.012)**2)*(.6+.4*np.sin(2*np.pi*u))
-height+=.042*np.sin(2*np.pi*(43*u+17*v+1.3*np.sin(2*np.pi*v)))
-dx=np.roll(height,-1,1)-np.roll(height,1,1)
-dy=np.roll(height,-1,0)-np.roll(height,1,0)
-normal=np.stack([-dx,-dy,np.ones_like(dx)],axis=2)
-normal/=np.linalg.norm(normal,axis=2,keepdims=True)
-rgba=np.ones((ny,nx,4),np.float32)
-rgba[:,:,:3]=.5+.5*normal
-relief=bpy.data.images.new("Wrist microrelief",nx,ny,alpha=False)
-relief.colorspace_settings.name="Non-Color"
-relief.pixels.foreach_set(rgba.ravel())
-relief.pack()
-texture=skin.node_tree.nodes.new("ShaderNodeTexImage")
-texture.image=relief
-nm=skin.node_tree.nodes.new("ShaderNodeNormalMap")
-skin.node_tree.links.new(texture.outputs["Color"],nm.inputs["Color"])
-skin.node_tree.links.new(nm.outputs["Normal"],skin.node_tree.nodes["Principled BSDF"].inputs["Normal"])
-geo.materials.append(skin)
-for poly in geo.polygons: poly.use_smooth=True
-wrist.parent=rig
-group=wrist.vertex_groups.new(name="WristRoot")
-group.add(list(range(len(verts))),1,"REPLACE")
-wrist.modifiers.new("Wrist motion","ARMATURE").object=rig
-shell.data.materials[0].node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value=(.039,.044,.050,1)
-
-# The black knit sleeve continues past the board before the forearm emerges.
-sleeve_points=[]; sleeve_faces=[]
-for row in range(19):
-    t=row/18
-    for col,v in enumerate(rim):
-        angle=2*np.pi*col/segments
-        scale=.955+.027*np.exp(-((t-.94)/.06)**2)+.008*np.sin(10*angle+5*t)
-        point=center+(v-center)*scale
-        point[0]-=.04*t
-        point[1]+=.065-.94*t
-        sleeve_points.append(point)
-        if row:
-            a=(row-1)*segments+col; b=(row-1)*segments+(col+1)%segments
-            sleeve_faces.append((a,b,b+segments,a+segments))
-sleeve_mesh=bpy.data.meshes.new("Long knitted cuff")
-sleeve_mesh.from_pydata(sleeve_points,[],sleeve_faces)
-sleeve_uv=sleeve_mesh.uv_layers.new(name="Textile")
-for poly in sleeve_mesh.polygons:
-    poly.use_smooth=True
-    for loop in poly.loop_indices:
-        row,col=divmod(sleeve_mesh.loops[loop].vertex_index,segments)
-        seam=col==0 and poly.index%segments==segments-1
-        sleeve_uv.data[loop].uv=(24*(1 if seam else col/segments),4*row/18)
-sleeve=bpy.data.objects.new("Knitted_wrist_sleeve",sleeve_mesh)
-bpy.context.collection.objects.link(sleeve)
-sleeve_mesh.materials.append(shell.data.materials[0])
-sleeve.parent=rig
-group=sleeve.vertex_groups.new(name="WristRoot")
-group.add(list(range(len(sleeve_points))),1,"REPLACE")
-sleeve.modifiers.new("Wrist motion","ARMATURE").object=rig
-
 bpy.context.preferences.filepaths.save_version=0
-bpy.data.objects["HSAD_Metadata"]["modelVersion"]="8.0-rigid-mounts"
+bpy.data.objects["HSAD_Metadata"]["modelVersion"]="5.1-thumb-web"
 bpy.ops.object.select_all(action="SELECT")
 bpy.context.view_layer.objects.active=shell
 bpy.ops.wm.save_as_mainfile(filepath=str(root/"assets/blender/hsad_reference_device.blend"))
