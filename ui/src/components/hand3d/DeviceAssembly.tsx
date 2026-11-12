@@ -89,9 +89,10 @@ export function DeviceAssembly({ model, active, expanded, resolve, focus }: {
     substrate?.traverse(object => {
       if (object instanceof THREE.Mesh) substrateMeshes.push(object)
     })
-    // Skip the substrate for both the camera and the R3F raycaster.
-    const substrateLayers = substrateMeshes.map(mesh => mesh.layers.mask)
-    substrateMeshes.forEach(mesh => mesh.layers.disableAll())
+    // The substrate connects all five branches to the board. Keep it in the
+    // assembled view and let pointer hits reach the individual components.
+    const substrateRaycasts = substrateMeshes.map(mesh => mesh.raycast)
+    substrateMeshes.forEach(mesh => { mesh.raycast = () => {} })
     const material = new THREE.LineBasicMaterial({ color: '#147581', transparent: true, opacity: .8, depthWrite: false })
     model.updateWorldMatrix(true, false)
     model.updateMatrixWorld(true)
@@ -121,7 +122,7 @@ export function DeviceAssembly({ model, active, expanded, resolve, focus }: {
       cluster.guide.position.copy(center)
     }
     return () => {
-      substrateMeshes.forEach((mesh, i) => { mesh.layers.mask = substrateLayers[i] })
+      substrateMeshes.forEach((mesh, i) => { mesh.raycast = substrateRaycasts[i] })
       for (const cluster of byId.values()) {
         cluster.members.forEach(member => member.dispose())
         group.remove(cluster.guide)
