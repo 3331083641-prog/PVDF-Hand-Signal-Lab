@@ -81,7 +81,7 @@ export const sensorMetadata = jointHotspots.map((joint) => ({
   anatomicalNodeName: joint.anatomicalNode,
 }))
 
-export type DevicePartId = 'fpc' | 'serpentine' | 'acquisition' | 'battery' | 'esp32' | 'imu' | 'conditioning' | 'sensor' | 'power'
+export type DevicePartId = 'fpc' | 'serpentine' | 'acquisition' | 'battery' | 'esp32' | 'imu' | 'conditioning' | 'sensor' | 'power' | 'mux' | 'serial'
 
 export type DevicePart = {
   id: DevicePartId
@@ -95,13 +95,15 @@ export type DevicePart = {
 export const deviceParts: DevicePart[] = [
   { id: 'sensor', label: '双层 PVDF 检测单元', description: '同一关节处的两层 PVDF 以相反极性响应，形成一对原始信号。', evidence: '论文图 2-2、图 2-10', nodeNames: ['SensorGroup'] },
   { id: 'fpc', label: '柔性 FPC', description: '主柔性板与五条指部支路共同承载检测单元和信号走线。', evidence: '论文图 2-3、EDA 柔性板工程', nodeNames: ['MainFPC', 'FingerFPC'] },
-  { id: 'serpentine', label: '蛇形柔性走线', description: '关节处的蛇形段为弯曲保留形变余量，使线路随手指自然运动。', evidence: '论文图 2-3、EDA 柔性板工程', nodeNames: ['Serpentine'] },
+  { id: 'serpentine', label: '蛇形柔性走线', description: '相邻感应片之间的镂空蛇形段在屈指时展开，为手背皮肤的伸长留出余量。', evidence: '毕业论文图 2-4a、b', nodeNames: ['Serpentine'] },
   { id: 'acquisition', label: '手背采集模块', description: '集中承载采集、控制与无线传输相关电路。', evidence: '论文图 2-5、硬板 EDA 工程', nodeNames: ['DeviceRoot', 'CircuitModule'] },
-  { id: 'conditioning', label: '信号调理区域', description: '电荷放大与调理电路将微弱压电响应转换为可采集电压。', evidence: '论文图 2-5、P1 电荷放大原理图', nodeNames: ['SignalConditioning'] },
-  { id: 'esp32', label: 'ESP32 主控', description: '协调多路采样、数据封装与无线传输。', evidence: '论文图 2-5、ESP32-WROOM-32E 原理图', nodeNames: ['ESP32Module'] },
-  { id: 'imu', label: 'IMU 姿态模块', description: '输出 Pitch、Yaw、Roll 三轴姿态，与 14 个关节角共同完成动作映射。', evidence: '论文系统结构与上位机 31 字段协议', nodeNames: ['IMUModule'] },
-  { id: 'battery', label: '内置电池', description: '为装置提供独立供电，支持无线工作。', evidence: '论文系统架构与电源原理图', nodeNames: ['BatteryModule'] },
-  { id: 'power', label: '电源管理区域', description: '完成电池供电、稳压与充电管理，为采集链提供稳定电源。', evidence: '硬板 EDA 电源与充电管理区域', nodeNames: ['PowerManagement'] },
+  { id: 'conditioning', label: '信号调理区域', description: '手背靠指根的两排芯片组成电荷放大阵列，将 PVDF 产生的电荷转换为可采集的电压。', evidence: '论文图 2-5、P1 电荷放大原理图', nodeNames: ['SignalConditioning'] },
+  { id: 'esp32', label: 'ESP32 主控', description: '腕侧偏小指方向的金属屏蔽罩覆盖 ESP32 模组，模组负责采样、数据封装与无线传输。', evidence: '论文图 2-5、ESP32-WROOM-32E 原理图', nodeNames: ['ESP32Module'] },
+  { id: 'imu', label: 'IMU 姿态模块', description: '手背双层 FPC 之间、靠指根的一侧装有 JY60。它经串口向 ESP32 发送手腕姿态。', evidence: '夹层透视 · 毕业论文图 2-5b、图 2-8', nodeNames: ['IMUModule'] },
+  { id: 'battery', label: '内置电池', description: '薄型锂电池位于手背 FPC 夹层靠腕侧，电极连接充放电电路，为装置供电。', evidence: '夹层透视 · 毕业论文图 2-5b', nodeNames: ['BatteryModule'] },
+  { id: 'mux', label: '模拟多路复用器', description: '屏蔽罩两侧的窄封装芯片负责切换模拟输入，让多路调理后的信号依次进入采样电路。', evidence: '毕业论文图 2-5a、图 2-7b', nodeNames: ['MuxPackage'] },
+  { id: 'serial', label: '串口下载电路', description: '金属罩靠小指一侧的电路用于串口传输与程序下载。', evidence: '毕业论文图 2-5a', nodeNames: ['SerialPackage'] },
+  { id: 'power', label: '电源管理区域', description: '腕侧靠拇指方向的充放电与供电器件连接夹层电池。', evidence: '硬板 EDA 电源与充电管理区域', nodeNames: ['PowerManagement'] },
 ]
 
 /** 返回与给定模型节点相匹配的器件；FingerFPC_*、Serpentine_* 等子节点使用前缀匹配。 */

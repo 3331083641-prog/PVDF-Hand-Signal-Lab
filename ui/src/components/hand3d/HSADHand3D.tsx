@@ -1,5 +1,5 @@
 import { Canvas, type ThreeEvent, useFrame, useLoader, useThree } from '@react-three/fiber'
-import { Component, Suspense, useEffect, useId, useMemo, useRef, type ReactNode } from 'react'
+import { Component, Suspense, useEffect, useId, useMemo, useRef, type RefObject, type ReactNode } from 'react'
 import * as THREE from 'three'
 import { DRACOLoader, GLTFLoader, OrbitControls, SkeletonUtils, type GLTF } from 'three-stdlib'
 import {
@@ -13,9 +13,9 @@ import type { JointAngles } from '../../data/mappingPresets'
 
 // Keep both teaching pages on the same reviewed asset. The revision query
 // prevents a browser from reusing the pre-correction GLB after deployment.
-export const HSAD_MODEL_URL = `${import.meta.env.BASE_URL}models/hsad/hsad_reference_device.glb?rev=5.0-photo`
+export const HSAD_MODEL_URL = `${import.meta.env.BASE_URL}models/hsad/hsad_reference_device.glb?rev=6.0-worn`
 
-export type HSADSelection = { type: 'joint' | 'part'; id: string }
+export type HSADSelection = { type: 'joint' | 'part'; id: string; hit?: { uuid: string; indices: number[]; weights: number[] } }
 export type HSADSelectionEvent = HSADSelection & { clientX: number; clientY: number }
 
 type HandProps = {
@@ -103,7 +103,12 @@ function validateModelSchema(scene: THREE.Object3D) {
   if (missing.length) throw new Error(`HSAD teaching model schema mismatch: ${missing.join(', ')}`)
 }
 
-function ModelControls({ targetObject, focusKey = '', resetNonce = 0 }: { targetObject?: THREE.Object3D; focusKey?: string; resetNonce?: number }) {
+type GuideProps = { marker: RefObject<HTMLDivElement | null> }
+type FocusTarget = { object: THREE.Object3D; hit?: HSADSelection['hit'] }
+
+function ModelControls({ target, focusKey, resetNonce = 0, marker, device }: GuideProps & {
+  target?: FocusTarget; focusKey: string; resetNonce?: number; device: boolean
+}) {
   const { camera, gl, size } = useThree()
   const controls = useRef<OrbitControls | null>(null)
   const previousFocusKey = useRef(focusKey)
@@ -130,28 +135,45 @@ function ModelControls({ targetObject, focusKey = '', resetNonce = 0 }: { target
     const distance = Math.max(9.6, 6.8 / Math.max(0.25, aspect))
     instance.maxDistance = Math.max(13, distance * 1.4)
     instance.target.set(0, 0, 0)
-    camera.position.set(0.03, 0.02, 1).normalize().multiplyScalar(distance)
+    camera.position.set(device ? .24 : .03, device ? .14 : .02, 1).normalize().multiplyScalar(distance)
     instance.update()
-  }, [camera, resetNonce, size.width, size.height])
+  }, [camera, resetNonce, size.width, size.height, device])
 
-  useEffect(() => {
+  const position = useMemo(() => new THREE.Vector3(), [])
+  const vertex = useMemo(() => new THREE.Vector3(), [])
+  useFrame(() => {
     const instance = controls.current
-    if (!instance || !targetObject || !focusKey || previousFocusKey.current === focusKey) return
-    previousFocusKey.current = focusKey
-    const target = new THREE.Vector3()
-    targetObject.getWorldPosition(target)
-    const previousTarget = instance.target.clone()
-    const direction = camera.position.clone().sub(previousTarget).normalize()
-    instance.target.lerp(target, 0.8)
-    camera.position.copy(target.clone().add(direction.multiplyScalar(5.3)))
+    if (!instance) return
+    if (target) {
+      const { object, hit } = target
+      object.updateWorldMatrix(true, false)
+      if (hit && object instanceof THREE.Mesh) {
+        position.set(0, 0, 0)
+        hit.indices.forEach((index, i) => position.addScaledVector(object.getVertexPosition(index, vertex), hit.weights[i]))
+        object.localToWorld(position)
+      } else {
+        object.getWorldPosition(position)
+      }
+      if (previousFocusKey.current !== focusKey) {
+        previousFocusKey.current = focusKey
+        vertex.copy(camera.position).sub(instance.target).normalize()
+        instance.target.copy(position)
+        camera.position.copy(position).addScaledVector(vertex, 5.8)
+      }
+    }
     instance.update()
-  }, [camera, focusKey, targetObject])
-
-  useFrame(() => controls.current?.update())
+    if (marker.current && target && device) {
+      camera.updateMatrixWorld()
+      position.project(camera)
+      marker.current.hidden = Math.abs(position.x) > 1 || Math.abs(position.y) > 1 || Math.abs(position.z) > 1
+      marker.current.style.left = ((position.x + 1) * 50) + '%'
+      marker.current.style.top = ((1 - position.y) * 50) + '%'
+    }
+  })
   return null
 }
 
-function LoadedHand({ angles, pitch = 0, yaw = 0, roll = 0, selected, onSelect, resetNonce }: HandProps) {
+function LoadedHand({ angles, pitch = 0, yaw = 0, roll = 0, selected, onSelect, resetNonce, presentation, marker }: HandProps & GuideProps) {
   const gltf = useLoader(GLTFLoader, HSAD_MODEL_URL, (loader) => {
     const draco = new DRACOLoader()
     draco.setDecoderPath(`${import.meta.env.BASE_URL}draco/`)
@@ -194,22 +216,18 @@ function LoadedHand({ angles, pitch = 0, yaw = 0, roll = 0, selected, onSelect, 
   ), [scene])
   const thumbCmcRest = useMemo(() => scene.getObjectByName('Thumb_CMC')?.quaternion.clone(), [scene])
 
-  const selectedObject = useMemo(() => {
-    if (!selected) return undefined
-    if (selected.type === 'joint') {
-      const joint = jointHotspots.find((item) => item.id === selected.id)
-      return joint
-        ? scene.getObjectByName(`Highlight_${joint.id}`)
-          ?? scene.getObjectByName(joint.anatomicalNode)
-          ?? findNamedOrPrefixedObject(scene, [joint.sensorNode])
-          ?? scene.getObjectByName(joint.boneNode)
-        : undefined
+  const target = useMemo<FocusTarget | undefined>(() => {
+    if (!selected) return
+    if (selected.hit) {
+      const object = scene.getObjectByProperty('uuid', selected.hit.uuid)
+      if (object) return { object, hit: selected.hit }
     }
-    const part = deviceParts.find((item) => item.id === selected.id)
-    if (part?.id === 'sensor') return findNamedOrPrefixedObject(scene, jointHotspots.map((joint) => joint.sensorNode))
-    return part ? findNamedOrPrefixedObject(scene, part.nodeNames) : undefined
+    const internal = selected.id === 'imu' ? 'IMUModule' : selected.id === 'battery' ? 'BatteryModule' : undefined
+    const name = selected.type === 'joint' ? 'Highlight_' + selected.id : internal ?? 'Guide_' + selected.id
+    const object = scene.getObjectByName(name)
+    if (!object) throw new Error('Missing teaching anchor: ' + name)
+    return { object }
   }, [scene, selected])
-
   useEffect(() => {
     scene.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return
@@ -218,6 +236,10 @@ function LoadedHand({ angles, pitch = 0, yaw = 0, roll = 0, selected, onSelect, 
         (resolved.type === selected.type && resolved.id === selected.id)
         || (selected.type === 'part' && selected.id === 'sensor' && resolved.type === 'joint')
       ))
+      const internal = resolved?.type === 'part' && (resolved.id === 'imu' || resolved.id === 'battery')
+      const reveal = internal && active && presentation === 'device'
+      object.visible = !internal || reveal
+      object.renderOrder = reveal ? (object.name.endsWith('_Internal') ? 20 : 21) : 0
       const materials = Array.isArray(object.material) ? object.material : [object.material]
       materials.forEach((material) => {
         if (!('color' in material)) return
@@ -228,14 +250,15 @@ function LoadedHand({ angles, pitch = 0, yaw = 0, roll = 0, selected, onSelect, 
         standard.transparent = isClickProxy
         standard.opacity = isClickProxy ? (active ? 0.2 : 0) : 1
         if (selected && resolved && !active && !isClickProxy) standard.color.multiplyScalar(0.94)
-        if (isClickProxy) standard.depthWrite = false
+        standard.depthTest = !reveal
+        standard.depthWrite = !isClickProxy && !reveal
         if (isClickProxy && active) standard.color.set('#d88314')
         standard.emissive?.set(active ? '#d88314' : '#000000')
         standard.emissiveIntensity = active ? (isClickProxy ? 0.32 : 0.18) : 0
         standard.needsUpdate = true
       })
     })
-  }, [scene, selected])
+  }, [scene, selected, presentation])
 
   const flexion = useMemo(() => new THREE.Quaternion(), [])
 
@@ -262,7 +285,7 @@ function LoadedHand({ angles, pitch = 0, yaw = 0, roll = 0, selected, onSelect, 
     }
     if (root.current) {
       targetQuaternion.setFromEuler(new THREE.Euler(
-        THREE.MathUtils.degToRad(pitch), THREE.MathUtils.degToRad(yaw), THREE.MathUtils.degToRad(roll), 'YXZ',
+        THREE.MathUtils.degToRad(pitch), THREE.MathUtils.degToRad(yaw), THREE.MathUtils.degToRad(roll + (presentation === 'device' ? -23 : 0)), 'YXZ',
       ))
       root.current.quaternion.slerp(targetQuaternion, 1 - Math.exp(-delta * 7))
     }
@@ -282,10 +305,21 @@ function LoadedHand({ angles, pitch = 0, yaw = 0, roll = 0, selected, onSelect, 
     if (!start || start.pointerId !== event.nativeEvent.pointerId) return
     const distance = Math.hypot(event.nativeEvent.clientX - start.x, event.nativeEvent.clientY - start.y)
     if (distance > 5) return
-    const resolution = resolveSelection(event.object)
+    const visible = event.intersections.filter(i => i.object.visible && i.object instanceof THREE.Mesh)
+    const picked = visible.find(i => i.object.renderOrder >= 20) ?? visible[0]
+    if (!picked) return
+    const resolution = resolveSelection(picked.object)
     if (!resolution) return
     event.stopPropagation()
-    onSelect?.({ ...resolution, clientX: event.nativeEvent.clientX, clientY: event.nativeEvent.clientY })
+    let hit: HSADSelection['hit']
+    if (picked.face && picked.object instanceof THREE.Mesh) {
+      const mesh = picked.object
+      const { a, b, c } = picked.face
+      const triangle = new THREE.Triangle(...[a, b, c].map(i => mesh.getVertexPosition(i, new THREE.Vector3())))
+      const weights = triangle.getBarycoord(mesh.worldToLocal(picked.point.clone()), new THREE.Vector3())
+      if (weights) hit = { uuid: mesh.uuid, indices: [a, b, c], weights: weights.toArray() }
+    }
+    onSelect?.({ ...resolution, hit, clientX: event.nativeEvent.clientX, clientY: event.nativeEvent.clientY })
   }
 
   return <>
@@ -299,7 +333,7 @@ function LoadedHand({ angles, pitch = 0, yaw = 0, roll = 0, selected, onSelect, 
         <primitive object={scene} />
       </group>
     </group>
-    <ModelControls targetObject={selectedObject} focusKey={selected ? `${selected.type}:${selected.id}` : ''} resetNonce={resetNonce} />
+    <ModelControls target={target} marker={marker} device={presentation === 'device'} focusKey={selected ? `${selected.type}:${selected.id}:${selected.hit?.uuid ?? ""}` : ''} resetNonce={resetNonce} />
   </>
 }
 
@@ -315,6 +349,8 @@ class ModelBoundary extends Component<{ children: ReactNode }, { failed: boolean
 
 export function HSADHand3D(props: HandProps) {
   const descriptionId = useId()
+  const marker = useRef<HTMLDivElement>(null)
+  const label = props.selected?.type === 'joint' ? props.selected.id : deviceParts.find(p => p.id === props.selected?.id)?.label
   return <div className={`hsad-hand-canvas ${props.className ?? ''}`} role="group" aria-label="可环绕查看并控制十四个关节的完整 HSAD 三维手" aria-describedby={descriptionId}>
     <span id={descriptionId} className="sr-only">深色柔性手套上覆盖橙黄色柔性 FPC、十四个检测单元与手背采集模块。三维舞台支持鼠标旋转缩放；所有关节选择和角度设置也可通过舞台旁的表单控件完成。</span>
     <ModelBoundary>
@@ -324,9 +360,10 @@ export function HSADHand3D(props: HandProps) {
           <directionalLight position={[-4, 7, 6]} intensity={2.15} />
           <directionalLight position={[4, 2, -3]} intensity={1.7} color="#c6edf0" />
           <pointLight position={[-3, -1, 3]} intensity={0.7} color="#f0a321" />
-          <LoadedHand {...props} />
+          <LoadedHand {...props} marker={marker} />
         </Canvas>
       </Suspense>
     </ModelBoundary>
+    {props.presentation === 'device' && label && <div key={label} hidden ref={marker} className="device-pin" aria-hidden="true"><span>{label}</span></div>}
   </div>
 }

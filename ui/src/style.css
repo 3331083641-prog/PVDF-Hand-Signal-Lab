@@ -267,3 +267,15 @@ input[type="range"] { width: 100%; height: 4px; accent-color: var(--orange); cur
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior:auto !important; animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; }
 }
+.device-stage .device-popover { left:auto; right:18px; top:84px; bottom:auto; width:min(270px,26%); transform:none; }
+.device-pin { position:absolute; z-index:3; width:15px; height:15px; transform:translate(-50%,-50%); border:2px solid white; border-radius:50%; box-shadow:0 0 0 2px #087780; pointer-events:none; }
+.device-pin span { position:absolute; left:18px; bottom:8px; width:max-content; padding:3px 7px; background:#10555c; color:white; font-size:13px; }
+.device-stage .stage-index { left:16px; right:16px; bottom:62px; justify-content:center; flex-wrap:wrap; }
+@media(max-width:800px){
+ .device-stage { display:flex; flex-direction:column; height:auto; min-height:0; }
+ .device-stage .hsad-hand-canvas { position:relative; inset:auto; height:410px; flex:none; order:0; }
+ .device-stage .device-popover,.device-stage .stage-index,.device-stage .stage-sequence { position:static; transform:none; width:auto; }
+ .device-stage .stage-index { display:flex; order:1; padding:6px; }
+ .device-stage .device-popover { order:3; }
+ .device-stage .stage-sequence { order:2; align-self:center; margin:4px 0; }
+}

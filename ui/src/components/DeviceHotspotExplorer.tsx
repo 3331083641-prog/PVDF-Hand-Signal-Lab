@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowRight, CircleStop, Focus, Play, RotateCcw } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { deviceParts, jointHotspots } from '../data/jointHotspots'
 import { defaultJointAngles } from '../data/mappingPresets'
 import { navigate } from './AppShell'
@@ -8,12 +8,10 @@ import { useTeachingMode } from './TeachingMode'
 
 export function DeviceHotspotExplorer() {
   const { mode } = useTeachingMode()
-  const stageRef = useRef<HTMLDivElement>(null)
   const [category, setCategory] = useState<'joint' | 'part'>('joint')
   const [selected, setSelected] = useState<HSADSelection>({ type: 'joint', id: 'T2' })
   const [playing, setPlaying] = useState(mode === 'teacher')
   const [resetNonce, setResetNonce] = useState(0)
-  const [popover, setPopover] = useState({ x: 76, y: 34 })
   const options = category === 'joint' ? jointHotspots : deviceParts
   const index = Math.max(0, options.findIndex((item) => item.id === selected.id))
   const joint = useMemo(() => selected.type === 'joint' ? jointHotspots.find((item) => item.id === selected.id) : undefined, [selected])
@@ -24,7 +22,6 @@ export function DeviceHotspotExplorer() {
     const timer = window.setInterval(() => {
       const next = (index + 1) % options.length
       setSelected({ type: category, id: options[next].id })
-      setPopover({ x: 73, y: 31 + (next % 3) * 12 })
     }, 2800)
     return () => window.clearInterval(timer)
   }, [category, index, options, playing])
@@ -36,24 +33,19 @@ export function DeviceHotspotExplorer() {
   }
 
   const selectFromModel = (value: HSADSelectionEvent) => {
-    const rect = stageRef.current?.getBoundingClientRect()
     setPlaying(false)
     setCategory(value.type)
-    setSelected({ type: value.type, id: value.id })
-    if (rect) setPopover({
-      x: Math.min(78, Math.max(42, (value.clientX - rect.left) / rect.width * 100 + 3)),
-      y: Math.min(69, Math.max(15, (value.clientY - rect.top) / rect.height * 100 - 4)),
-    })
+    setSelected({ type: value.type, id: value.id, hit: value.hit })
+
   }
 
   const move = (delta: number) => {
     const next = (index + delta + options.length) % options.length
     setSelected({ type: category, id: options[next].id })
-    setPopover({ x: 74, y: 29 + (next % 4) * 9 })
   }
 
   return <section className="device-explorer">
-    <div className="device-stage" ref={stageRef}>
+    <div className="device-stage">
       <div className="instrument-toolbar">
         <div role="group" aria-label="查看对象"><button aria-pressed={category === 'joint'} onClick={() => chooseCategory('joint')}>14 个检测单元</button><button aria-pressed={category === 'part'} onClick={() => chooseCategory('part')}>装置器件</button></div>
         <button onClick={() => setResetNonce((value) => value + 1)}><RotateCcw size={17} />复位视角</button>
@@ -61,7 +53,7 @@ export function DeviceHotspotExplorer() {
 
       <HSADHand3D angles={defaultJointAngles} presentation="device" selected={selected} onSelect={selectFromModel} resetNonce={resetNonce} />
 
-      <aside className="device-popover" style={{ left: `${popover.x}%`, top: `${popover.y}%` }} aria-live="polite">
+      <aside className="device-popover" aria-live="polite">
         <span className="popover-eyebrow"><Focus size={14} />{joint ? `检测单元 ${joint.channel}` : '装置器件'}</span>
         <strong>{joint?.label ?? part?.label}</strong>
         <p>{joint?.role ?? part?.description}</p>

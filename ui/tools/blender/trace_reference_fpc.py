@@ -71,7 +71,8 @@ package("ESP32_Shield",[(154,751),(217,756),(214,832),(151,826)],.093,"esp32")
 package("ESP32Module",[(147,745),(229,749),(224,863),(145,859)],.036,"esp32")
 for i,(x,y,w,h) in enumerate([(100,745,10,18),(130,747,11,16),(122,774,17,21),(262,783,10,19),
         (261,810,10,18),(249,845,23,15),(285,846,12,23),(297,776,17,9),(295,814,18,10)]):
-    patch("PowerPackage_%02d"%i,"power",box(x-w/2,y-h/2,x+w/2,y+h/2),.040)
+    kind = "mux" if i in (0,1,3,4) else "serial" if i==2 else "power"
+    patch(f"{kind.title()}Package_{i:02d}",kind,box(x-w/2,y-h/2,x+w/2,y+h/2),.040)
 
 # Use the low-saturation component bodies in the populated regions of the
 # photograph to pick up the small passives and solder islands around the ICs.
@@ -82,13 +83,13 @@ for x,y in [(114,641),(168,644),(221,646),(276,649),(126,698),(182,701),(236,704
 cv2.fillPoly(populated,[np.int32([(88,731),(141,736),(142,849),(118,846),(85,779)])],1)
 cv2.fillPoly(populated,[np.int32([(235,765),(319,767),(325,869),(234,866)])],1)
 found,_=cv2.findContours(((hsv[:,:,1]<87)*populated).astype("uint8"),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
-passives={"conditioning":[],"power":[]}
+passives={"conditioning":[],"acquisition":[]}
 for contour in found:
     x,y,w,h=cv2.boundingRect(contour)
     if 3<=w<=14 and 2<=h<=10 and 5<=cv2.contourArea(contour)<=75:
         hull=cv2.convexHull(contour)[:,0,:]
         if len(hull)>=3:
-            passives["conditioning" if y<732 else "power"].append(Polygon(hull))
+            passives["conditioning" if y<732 else "acquisition"].append(Polygon(hull))
 from shapely.ops import unary_union
 for kind,items in passives.items():
     patch("SMD_"+kind,kind,unary_union(items),.017)
