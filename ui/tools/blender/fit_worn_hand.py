@@ -7,10 +7,10 @@ from mathutils import Vector
 # Each sensing pivot sits beneath the printed center of its PVDF pad.
 # Z is depth relative to the middle of the palm, in reference-image pixels.
 DIGITS = {
-    "Index":  ([(343,500,2),(359,306,5),(370,190,1),(375,126,-4)], [43,39,34,28]),
-    "Middle": ([(246,484,4),(258,270,7),(265,151,2),(268,87,-4)], [46,41,35,29]),
-    "Ring":   ([(155,494,1),(155,291,4),(156,177,0),(156,116,-6)], [42,38,34,28]),
-    "Little": ([(73,516,-3),(73,357,0),(71,253,-3),(69,190,-9)], [38,35,31,26]),
+    "Index":  ([(343,500,2),(359,306,5),(370,190,1),(375,126,-4)], [40,36,32,26]),
+    "Middle": ([(246,484,4),(258,270,7),(265,151,2),(268,87,-4)], [42,38,33,27]),
+    "Ring":   ([(155,494,1),(155,291,4),(156,177,0),(156,116,-6)], [38,34,30,25]),
+    "Little": ([(73,516,-3),(73,357,0),(71,253,-3),(69,190,-9)], [32,29,26,24]),
     "Thumb":  ([(331,793,-14),(528,646,-10),(641,501,-13),(666,466,-21)], [76,49,39,32]),
 }
 
@@ -74,9 +74,22 @@ def sculpt(shell):
     depth = np.interp(y,levels,[22,28,34,42,47,50,51,50,48,46,43])
     lateral = (2*x-right-left)/(right-left)
     # Rounded heel and relatively flat dorsal support under the populated board.
-    section = ((abs(lateral)**3.8+abs(z/depth)**3.8)**(1/3.8)-1)*depth
-    top = 483 + 34*((x-218)/178)**2
-    field = np.maximum(section,np.maximum(top-y,y-922))
+    # Transverse arch: the palm is hollow between the thenar and
+    # hypothenar eminences; the dorsal side rounds over the metacarpals.
+    hollow=14*np.exp(-((x-206)/88)**2-((y-680)/122)**2)
+    upper=depth+5*np.exp(-((x-230)/103)**2-((y-563)/86)**2)
+    lower=depth-hollow
+    central_z=(upper-lower)/2
+    # Follow the main palmar flexion folds only on the volar surface.
+    # Textile rounds these landmarks so they read as shallow depressions.
+    for level,slope,amplitude in [(563,.19,5.0),(621,-.16,4.5)]:
+        fold=y-level-slope*(x-213)-.0009*(x-213)**2
+        lower-=amplitude*np.exp(-(fold/9)**2-((x-215)/135)**4)
+    central_z=(upper-lower)/2
+    top=520+39*((x-220)/176)**2
+    endcap=np.maximum(top-y,0)/55
+    section=((abs(lateral)**2.65+abs((z-central_z)/((upper+lower)/2))**2.65+endcap**2)**(1/2.65)-1)*depth
+    field=np.maximum(section,y-922)
 
     def pad(cx,cy,cz,rx,ry,rz,tilt=0):
         dx=x-cx; dy=y-cy
@@ -84,7 +97,7 @@ def sculpt(shell):
         return (np.sqrt(((c*dx+s*dy)/rx)**2+((-s*dx+c*dy)/ry)**2+((z-cz)/rz)**2)-1)*rz
 
     for args,blend in [
-        ((345,751,-18,78,106,50,-.47),26), ((104,731,-20,56,99,39,.17),19),
+        ((335,741,-27,73,121,43,-.51),36), ((104,716,-22,52,118,36,.20),30),
         ((111,524,0,51,39,22,.12),16), ((200,504,2,56,34,24,-.10),16),
         ((295,505,4,57,38,25,.16),16),
     ]:
@@ -102,6 +115,12 @@ def sculpt(shell):
     field=union(field,np.maximum(web,np.maximum(350-x,x-540)),14)
 
     for finger,(path,radii) in DIGITS.items():
+        if finger!="Thumb":
+            cx,cy,cz=path[0]
+            # Carry each metacarpal into its knuckle. These sloping roots
+            # close the space beneath the board without filling the free digits.
+            field=union(field,pad(cx,cy+59,cz,radii[0]*1.07,95,32),18)
+            field=union(field,pad(cx,cy+48,-17,radii[0]*.95,61,26),14)
         for i,(start,end) in enumerate(zip(path,path[1:])):
             a,b = np.array(start),np.array(end)
             d = b-a
@@ -112,12 +131,22 @@ def sculpt(shell):
             cross = (x-a[0])*uy-(y-a[1])*ux
             # A slight bow and pad fullness break the straight tube silhouette.
             bow = (5 if finger=="Thumb" else 1.8)*np.sin(np.pi*u)
-            radius = (radii[i]*(1-u)+radii[i+1]*u)*(1-.043*np.sin(np.pi*u)**2)
-            dz = z-(a[2]+u*d[2]+2.5*np.sin(np.pi*u))
-            rz = radius*np.where(dz<0,1.02,.82)
-            cap = np.maximum(np.maximum(-t,t-length),0)/radius
-            sdf = ((abs((cross-bow)/radius)**2.8+abs(dz/rz)**2.8+cap**2.8)**(1/2.8)-1)*radius
-            field = union(field,sdf,19 if i==0 else 4)
+            shaft=np.sin(np.pi*u)**2
+            radius=(radii[i]*(1-u)+radii[i+1]*u)*(1-.09*shaft)
+            dz=z-(a[2]+u*d[2]+3.5*np.sin(np.pi*u))
+            # Paired interphalangeal creases on the palm; phalangeal pads
+            # and rounded knuckles give each segment a distinct side profile.
+            crease=2.5*np.exp(-((t-5-.12*cross)/5)**2)+1.4*np.exp(-((t+7-.10*cross)/4)**2)
+            knuckle=3.8*np.exp(-(t/20)**2)
+            volar=radius*.85+5*shaft-crease
+            dorsal=radius*.75+knuckle
+            rz=np.where(dz<0,volar,dorsal)
+            cap=np.maximum(np.maximum(-t,t-length),0)/radius
+            sdf=((abs((cross-bow)/radius)**2.25+abs(dz/rz)**2.25+cap**2.25)**(1/2.25)-1)*radius
+            # Blend into the palm only near the MCP. Applying the large
+            # union radius along the whole shaft bridges neighbouring fingers.
+            width=3+16*np.exp(-(t/33)**2) if i==0 else 3
+            field=union(field,sdf,width)
     pixels,faces = surface_nets(field,origin,step)
     points = world(pixels)
     mat = shell.data.materials[0]
@@ -162,6 +191,10 @@ def bind(shell,points):
     dist=np.array(distances)
     affinity=np.exp(-(dist**2-dist.min(axis=0)**2)/(21**2))
     affinity/=affinity.sum(axis=0)
+    # Beyond the web, every shaft belongs exclusively to its own chain.
+    free=(points[:,1]<458) & (points[:,0]<396)
+    nearest=dist[:,free].argmin(axis=0)
+    affinity[:,free]=np.eye(len(DIGITS))[nearest].T
     groups={"WristRoot":np.ones(len(points))}
     for i,finger in enumerate(DIGITS):
         names=("CMC","MCP","IP") if finger=="Thumb" else ("MCP","PIP","DIP")

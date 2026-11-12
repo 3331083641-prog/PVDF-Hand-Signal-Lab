@@ -93,10 +93,29 @@ for pad in [o for o in parts if o["hsadPartId"]=="sensor"]:
     error=np.linalg.norm(pixel-dots[code[0]][int(code[1])-1])
     print(f"{pad.name} dot alignment: {error:.2f} reference pixels")
     assert error<2
+# Identify free finger surfaces in rest space once, then test the same
+# triangles on the evaluated mesh as the hand closes.
+shell.data.calc_loop_triangles()
+rest_xyz=np.array([v.co[:] for v in shell.data.vertices])
+tri=np.array([t.vertices[:] for t in shell.data.loop_triangles])
+rest_pixels=rest_xyz[:,:2]*[110,-110]+[215,654]
+free=tri[np.all(rest_pixels[tri,1]<458,axis=1)]
+extents=rest_pixels[free,0]
+assert not np.any((extents.min(axis=1)<114)&(extents.max(axis=1)>114)), "Web connects the free little and ring fingers"
+little=free[extents.max(axis=1)<114].tolist()
+ring=free[(extents.min(axis=1)>114)&(extents.max(axis=1)<198)].tolist()
+assert little and ring
+def check_fingers(graph):
+    posed=[v.co[:] for v in shell.evaluated_get(graph).data.vertices]
+    a=BVHTree.FromPolygons(posed,little,all_triangles=True)
+    b=BVHTree.FromPolygons(posed,ring,all_triangles=True)
+    assert not a.overlap(b), "Little and ring finger surfaces intersect"
+
 worst = 0
 for fraction in (0,.25,.5,.75,1):
     pose(fraction)
     graph = bpy.context.evaluated_depsgraph_get()
+    check_fingers(graph)
     tree = BVHTree.FromObject(shell,graph)
     assert shell.matrix_world.is_identity
     for kind in ("sensor","serpentine"):
@@ -108,3 +127,11 @@ for fraction in (0,.25,.5,.75,1):
     print(f"PAD strain p95={np.percentile(stretch,95):.4f} max={max(stretch):.4f}")
 print(f"WORST absolute clearance {worst:.4f} Blender units")
 assert worst<.018, "Attachment error exceeds two reference-image pixels"
+
+for finger in ("Little","Ring"):
+    pose(0)
+    for joint,angle in zip(("MCP","PIP","DIP"),fist[finger]):
+        rig.pose.bones[f"{finger}_{joint}"].rotation_quaternion=turn(0,-angle)
+    bpy.context.view_layer.update()
+    check_fingers(bpy.context.evaluated_depsgraph_get())
+print("Independent little and ring finger flexion passed")

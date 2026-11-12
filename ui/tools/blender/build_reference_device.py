@@ -299,7 +299,7 @@ wrist.parent=rig
 group=wrist.vertex_groups.new(name="WristRoot")
 group.add(list(range(len(verts))),1,"REPLACE")
 wrist.modifiers.new("Wrist motion","ARMATURE").object=rig
-shell.data.materials[0].node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value=(.022,.025,.029,1)
+shell.data.materials[0].node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value=(.039,.044,.050,1)
 
 # The black knit sleeve continues past the board before the forearm emerges.
 sleeve_points=[]; sleeve_faces=[]
@@ -333,7 +333,7 @@ group.add(list(range(len(sleeve_points))),1,"REPLACE")
 sleeve.modifiers.new("Wrist motion","ARMATURE").object=rig
 
 bpy.context.preferences.filepaths.save_version=0
-bpy.data.objects["HSAD_Metadata"]["modelVersion"]="7.1-joint-centers"
+bpy.data.objects["HSAD_Metadata"]["modelVersion"]="7.2-hand-contours"
 bpy.ops.object.select_all(action="SELECT")
 bpy.context.view_layer.objects.active=shell
 bpy.ops.wm.save_as_mainfile(filepath=str(root/"assets/blender/hsad_reference_device.blend"))
