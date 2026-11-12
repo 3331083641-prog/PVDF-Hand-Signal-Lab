@@ -1,0 +1,27 @@
+# Local files
+backups/
+logs/
+dist/
+dist-ssr/
+node_modules/
+venv/
+.venv/
+.cache/
+__pycache__/
+*.py[cod]
+*.log
+*.blend1
+*.blend2
+.env
+.env.*
+!.env.example
+*.local
+.edge*/
+github_pages_upload/
+.agents/
+.codex/
+.impeccable/
+.idea/
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
