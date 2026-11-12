@@ -13,7 +13,7 @@ import type { JointAngles } from '../../data/mappingPresets'
 
 // Keep both teaching pages on the same reviewed asset. The revision query
 // prevents a browser from reusing the pre-correction GLB after deployment.
-export const HSAD_MODEL_URL = `${import.meta.env.BASE_URL}models/hsad/hsad_reference_device.glb?rev=5.1-thumb-web`
+export const HSAD_MODEL_URL = `${import.meta.env.BASE_URL}models/hsad/hsad_reference_device.glb?rev=5.3-thumb-flexion`
 
 export type HSADSelection = { type: 'joint' | 'part'; id: string }
 export type HSADSelectionEvent = HSADSelection & { clientX: number; clientY: number }
@@ -106,6 +106,8 @@ function validateModelSchema(scene: THREE.Object3D) {
 function ModelControls({ targetObject, focusKey = '', resetNonce = 0 }: { targetObject?: THREE.Object3D; focusKey?: string; resetNonce?: number }) {
   const { camera, gl, size } = useThree()
   const controls = useRef<OrbitControls | null>(null)
+  const flight = useRef<{ target: THREE.Vector3; camera: THREE.Vector3 } | null>(null)
+  const reduced = useMemo(() => matchMedia('(prefers-reduced-motion: reduce)'), [])
   const previousFocusKey = useRef(focusKey)
 
   useEffect(() => {
@@ -118,6 +120,7 @@ function ModelControls({ targetObject, focusKey = '', resetNonce = 0 }: { target
     instance.minPolarAngle = Math.PI * 0.12
     instance.maxPolarAngle = Math.PI * 0.82
     instance.target.set(0, 0, 0)
+    instance.addEventListener('start', () => { flight.current = null })
     controls.current = instance
     return () => instance.dispose()
   }, [camera, gl])
@@ -125,6 +128,7 @@ function ModelControls({ targetObject, focusKey = '', resetNonce = 0 }: { target
   useEffect(() => {
     const instance = controls.current
     if (!instance) return
+    flight.current = null
     // Leave room for the extended thumb on the narrow laboratory canvas.
     const aspect = size.width / Math.max(1, size.height)
     const distance = Math.max(9.6, 6.8 / Math.max(0.25, aspect))
@@ -140,14 +144,25 @@ function ModelControls({ targetObject, focusKey = '', resetNonce = 0 }: { target
     previousFocusKey.current = focusKey
     const target = new THREE.Vector3()
     targetObject.getWorldPosition(target)
-    const previousTarget = instance.target.clone()
-    const direction = camera.position.clone().sub(previousTarget).normalize()
-    instance.target.lerp(target, 0.8)
-    camera.position.copy(target.clone().add(direction.multiplyScalar(5.3)))
-    instance.update()
+    const offset = camera.position.clone().sub(instance.target)
+    const distance = Math.min(offset.length(), 5.3)
+    flight.current = { target, camera: target.clone().add(offset.setLength(distance)) }
   }, [camera, focusKey, targetObject])
 
-  useFrame(() => controls.current?.update())
+  useFrame((_, dt) => {
+    const instance = controls.current
+    if (!instance) return
+    const next = flight.current
+    if (next) {
+      const alpha = reduced.matches ? 1 : 1 - Math.exp(-dt * 16)
+      instance.target.lerp(next.target, alpha)
+      camera.position.lerp(next.camera, alpha)
+      if (camera.position.distanceToSquared(next.camera) + instance.target.distanceToSquared(next.target) < 1e-6) {
+        flight.current = null
+      }
+    }
+    instance.update()
+  })
   return null
 }
 
@@ -194,6 +209,11 @@ function LoadedHand({ angles, pitch = 0, yaw = 0, roll = 0, selected, onSelect, 
   ), [scene])
   const thumbCmcRest = useMemo(() => scene.getObjectByName('Thumb_CMC')?.quaternion.clone(), [scene])
 
+  const oppositionEnd = useMemo(() => {
+    const local = scene.getObjectByName('Thumb_CMC')!.userData.visualOpposition
+    return new THREE.Quaternion().fromArray(local)
+  }, [scene])
+
   const selectedObject = useMemo(() => {
     if (!selected) return undefined
     if (selected.type === 'joint') {
@@ -210,13 +230,18 @@ function LoadedHand({ angles, pitch = 0, yaw = 0, roll = 0, selected, onSelect, 
     return part ? findNamedOrPrefixedObject(scene, part.nodeNames) : undefined
   }, [scene, selected])
 
+  const emphasis = useRef<THREE.MeshStandardMaterial[]>([])
+  const reduced = useMemo(() => matchMedia('(prefers-reduced-motion: reduce)'), [])
+  const selectedId = selected?.id
+  const selectedType = selected?.type
   useEffect(() => {
+    emphasis.current = []
     scene.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return
       const resolved = resolveSelection(object)
-      const active = Boolean(selected && resolved && (
-        (resolved.type === selected.type && resolved.id === selected.id)
-        || (selected.type === 'part' && selected.id === 'sensor' && resolved.type === 'joint')
+      const active = Boolean(selectedId && resolved && (
+        (resolved.type === selectedType && resolved.id === selectedId)
+        || (selectedType === 'part' && selectedId === 'sensor' && resolved.type === 'joint')
       ))
       const materials = Array.isArray(object.material) ? object.material : [object.material]
       materials.forEach((material) => {
@@ -227,20 +252,28 @@ function LoadedHand({ angles, pitch = 0, yaw = 0, roll = 0, selected, onSelect, 
         const isClickProxy = material.name === 'UI_Click_Proxy'
         standard.transparent = isClickProxy
         standard.opacity = isClickProxy ? (active ? 0.2 : 0) : 1
-        if (selected && resolved && !active && !isClickProxy) standard.color.multiplyScalar(0.94)
+        if (selectedId && resolved && !active && !isClickProxy) standard.color.multiplyScalar(0.94)
         if (isClickProxy) standard.depthWrite = false
         if (isClickProxy && active) standard.color.set('#d88314')
         standard.emissive?.set(active ? '#d88314' : '#000000')
         standard.emissiveIntensity = active ? (isClickProxy ? 0.32 : 0.18) : 0
-        standard.needsUpdate = true
+        if (active && !isClickProxy && !reduced.matches) {
+          standard.emissiveIntensity = .36
+          emphasis.current.push(standard)
+        }
       })
     })
-  }, [scene, selected])
+  }, [scene, selectedId, selectedType, reduced])
 
   const flexion = useMemo(() => new THREE.Quaternion(), [])
 
   const targetQuaternion = useMemo(() => new THREE.Quaternion(), [])
   useFrame((_, delta) => {
+    if (emphasis.current.length) {
+      const level = reduced.matches ? .18 : THREE.MathUtils.damp(emphasis.current[0].emissiveIntensity, .18, 18, delta)
+      emphasis.current.forEach(material => { material.emissiveIntensity = level })
+      if (level < .181) emphasis.current = []
+    }
     jointHotspots.forEach((joint) => {
       const bone = scene.getObjectByName(joint.boneNode)
       const rest = restQuaternions.get(joint.id)
@@ -249,14 +282,14 @@ function LoadedHand({ angles, pitch = 0, yaw = 0, roll = 0, selected, onSelect, 
       flexion.setFromAxisAngle(flexAxes[joint.flexAxis], bend)
       targetQuaternion.copy(rest).multiply(flexion)
       bone.quaternion.slerp(targetQuaternion, 1 - Math.exp(-delta * 8.5))
+      if (joint.id === 'T1' || joint.id === 'T2') {
+        scene.getObjectByName('Mount_' + joint.boneNode)!.quaternion.copy(rest).slerp(bone.quaternion, .5)
+      }
     })
-    // Thumb_CMC is an auxiliary (non-sensing) bone. A restrained in-plane
-    // opposition component keeps the thumb base connected and makes T1/T2
-    // flexion read as a hand movement rather than a hinged side branch.
+    // Unsensed visual coupling. The actual MCP/IP inputs remain independent.
     const thumbCmc = scene.getObjectByName('Thumb_CMC')
     if (thumbCmc && thumbCmcRest) {
-      const opposition = THREE.MathUtils.degToRad((angles.T1 ?? 0) * 0.22)
-      flexion.setFromAxisAngle(flexAxes.z, opposition)
+      flexion.identity().slerp(oppositionEnd, THREE.MathUtils.smoothstep(angles.T1 ?? 0, 0, 90))
       targetQuaternion.copy(thumbCmcRest).multiply(flexion)
       thumbCmc.quaternion.slerp(targetQuaternion, 1 - Math.exp(-delta * 7.5))
     }

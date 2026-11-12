@@ -8,6 +8,7 @@ from pathlib import Path
 import bpy
 import numpy as np
 from mathutils import Vector
+from mathutils.geometry import convex_hull_2d
 from mathutils.bvhtree import BVHTree
 
 root = Path(__file__).resolve().parents[2]
@@ -84,8 +85,48 @@ for name,h,t in rest:
     h.xy=warp([h.x,h.y])[0]
     t.xy=warp([t.x,t.y])[0]
     bone.head,bone.tail=h,t
+# Register only the sensed thumb pivots beneath the printed sensing dots.
+thumb_chain=[rig.data.edit_bones["Thumb_"+suffix] for suffix in ("CMC","MCP","IP")]
+thumb_pivots=[landmarks["Thumb"][0],(528,646),(641,501),landmarks["Thumb"][-1]]
+rest_surface=BVHTree.FromPolygons([v.co for v in shell.data.vertices],
+                                  [tuple(p.vertices) for p in shell.data.polygons])
+for parent,child,pixel in zip(thumb_chain,thumb_chain[1:],thumb_pivots[1:3]):
+    pivot=child.head.copy()
+    pivot.xy=xy(pixel)
+    dorsal_hit=rest_surface.ray_cast(Vector((*pivot.xy,2)),Vector((0,0,-1)))[0]
+    volar_hit=rest_surface.ray_cast(Vector((*pivot.xy,-2)),Vector((0,0,1)))[0]
+    pivot.z=(dorsal_hit.z+volar_hit.z)/2
+    parent.tail=child.head=pivot
+# The thumb closes obliquely across the volar palm. Set the two flexion
+# frames in the rest rig, using the index knuckle and a palmar approach.
+index_knuckle=rig.data.edit_bones["Index_MCP"].head.copy()
+volar=Vector((0,0,-1))
+shaft=(thumb_chain[1].tail-thumb_chain[1].head).normalized()
+inward=index_knuckle-thumb_chain[1].head
+inward=(inward-shaft*inward.dot(shaft)).normalized()
+for bone in thumb_chain[1:]:
+    bone.align_roll(-(inward+volar).normalized())
+    mount=rig.data.edit_bones.new("Mount_"+bone.name)
+    mount.parent=bone.parent
+    mount.head,mount.tail,mount.roll=bone.head.copy(),bone.tail.copy(),bone.roll
 bpy.ops.object.mode_set(mode="OBJECT")
 bpy.context.view_layer.update()
+for name in ("Thumb_MCP","Thumb_IP"):
+    follow=rig.pose.bones["Mount_"+name].constraints.new("COPY_TRANSFORMS")
+    follow.target,follow.subtarget=rig,name
+    follow.owner_space=follow.target_space="LOCAL"
+    follow.influence=.5
+
+# The unsensed root contributes a small palmar sweep. Bound the excursion
+# of the MCP to one local glove radius; the two measured hinges do the curl.
+cmc=rig.data.bones["Thumb_CMC"]
+forward=(cmc.tail_local-cmc.head_local).normalized()
+center=cmc.tail_local
+skin=rest_surface.ray_cast(Vector((*center.xy,2)),Vector((0,0,-1)))[0]
+aim=(forward*cmc.length+(inward+volar).normalized()*(skin.z-center.z)).normalized()
+local=cmc.matrix_local.to_3x3().inverted()
+delta=(local@forward).rotation_difference(local@aim)
+cmc["visualOpposition"]=[delta.x,delta.y,delta.z,delta.w]
 mesh=shell.data
 # Rebind the thumb in the registered (photographic) rest space. The old
 # nearest-chain weights were calculated before the thin-plate warp.
@@ -93,10 +134,21 @@ def smooth_band(value, start, end):
     t=np.clip((value-start)/(end-start),0,1)
     return t*t*(3-2*t)
 
+def outline_distance(uv,part_name):
+    outline=np.array(next(p["points"] for p in parts if p["name"]==part_name))
+    hull=outline[convex_hull_2d([Vector(v) for v in outline])]
+    edges=np.roll(hull,-1,axis=0)-hull
+    orientation=np.sign(np.sum(hull[:,0]*edges[:,1]-hull[:,1]*edges[:,0]))
+    outside=np.full(len(uv),-np.inf)
+    for pt,edge in zip(hull,edges):
+        dx,dy=(uv-pt).T
+        outside=np.maximum(outside,orientation*(dx*edge[1]-dy*edge[0])/np.linalg.norm(edge))
+    return outside
+
 def bind_thumb_web():
     xyz=np.array([v.co[:] for v in mesh.vertices])
     uv=xyz[:,:2]*[110,-110]+[215,654]
-    joints=np.array(landmarks["Thumb"],dtype=float)
+    joints=np.array(thumb_pivots,dtype=float)
     axes=np.diff(joints,axis=0)
     lengths=np.linalg.norm(axes,axis=1)
     axes/=lengths[:,None]
@@ -113,11 +165,21 @@ def bind_thumb_web():
         distances.append(np.linalg.norm(d-np.clip(d@axis,0,length)[:,None]*axis,axis=1))
     radius=np.min(distances,axis=0)
     thumb=smooth_band(along,-88,40)*(1-smooth_band(radius,57,145))
-    bend=smooth_band(mcp,-76,76)
-    distal=smooth_band(ip,-55,55)
+    # The dorsal heel under the acquisition board stays with the palm.
+    # The flexible lateral shoulder still follows the thumb and the volar web.
+    board=(1-smooth_band(outline_distance(uv,"MainFPC"),2,35))*smooth_band(xyz[:,2]*110,-18,-1)
+    thumb*=1-board
+    bend=smooth_band(mcp,-100,100)
+    distal=smooth_band(ip,-70,70)
     names=("Thumb_CMC","Thumb_MCP","Thumb_IP")
     ids=[shell.vertex_groups[n].index for n in names]
     root_id=shell.vertex_groups["WristRoot"].index
+    masks=[]
+    mounts=[]
+    for part_name,bone in (("Sensor_T1","Thumb_MCP"),("Sensor_T2","Thumb_IP")):
+        outside=outline_distance(uv,part_name)
+        masks.append((1-smooth_band(outside,6,30))*smooth_band(xyz[:,2]*110,-18,2))
+        mounts.append(shell.vertex_groups.new(name="Mount_"+bone).index)
     for v in mesh.vertices:
         idx=v.index
         old={g.group:g.weight for g in v.groups}
@@ -127,7 +189,20 @@ def bind_thumb_web():
         # A former exclusively thumb-bound vertex requires a palm fallback.
         other[root_id]=other.get(root_id,0)+sum(old.get(k,0) for k in ids)
         weights={k:w*(1-thumb[idx]) for k,w in other.items()}
-        weights.update(zip(ids,thumb[idx]*np.array([1-bend[idx],bend[idx]*(1-distal[idx]),bend[idx]*distal[idx]])))
+        proximal=1-bend[idx]
+        middle=bend[idx]*(1-distal[idx])
+        tip=bend[idx]*distal[idx]
+        # Share the oblique inner crease with the half-angle frames too.
+        # Direct blending between two 90-degree end frames loses knuckle volume.
+        mcp_share=min(proximal,middle)
+        ip_share=min(middle-mcp_share,tip)
+        weights.update(zip(ids,thumb[idx]*np.array([proximal-mcp_share,middle-mcp_share-ip_share,tip-ip_share])))
+        weights[mounts[0]]=2*thumb[idx]*mcp_share
+        weights[mounts[1]]=2*thumb[idx]*ip_share
+        mask=max(m[idx] for m in masks)
+        if mask:
+            weights={k:w*(1-mask) for k,w in weights.items()}
+            weights[mounts[int(masks[1][idx]>masks[0][idx])]]+=mask
         keep=sorted(weights.items(),key=lambda item:-item[1])[:4]
         total=sum(w for _,w in keep)
         for k in old: shell.vertex_groups[k].remove([idx])
@@ -218,6 +293,10 @@ for name,dims in [("BatteryModule",(1.22,.80,.12)),("IMUModule",(.35,.30,.07))]:
 
 from functools import lru_cache
 support= lru_cache(maxsize=None)(support)
+# Shared cut edges must use the same attachment on both adjoining meshes.
+thumb_edge_bones={"MainFPC":"WristRoot","Sensor_T1":"Mount_Thumb_MCP","Sensor_T2":"Mount_Thumb_IP"}
+thumb_edges={tuple(p):thumb_edge_bones[part["name"]] for part in parts
+             if part["name"] in thumb_edge_bones for p in part["points"]}
 for part in parts:
     name,kind=part["name"],part["kind"]
     pixels=[tuple(p) for p in part["points"]]
@@ -250,9 +329,13 @@ for part in parts:
     obj["hsadPartId"]=kind
     if kind=="sensor":
         for k,val in old_meta[name].items(): obj[k]=val
-        bone=obj["boneName"]
+        bone=("Mount_" if name in ("Sensor_T1","Sensor_T2") else "")+obj["boneName"]
+        marker_center=center
+        if name in ("Sensor_T1","Sensor_T2"):
+            dot=thumb_pivots[1 if name=="Sensor_T1" else 2]
+            marker_center=support(dot)[0]
         for tag in (obj["anatomicalNodeName"],"Highlight_"+obj["hsadJointId"]):
-            a=anchor(tag,center,None,bone)
+            a=anchor(tag,marker_center,None,bone)
             a["hsadJointId"]=obj["hsadJointId"]
     mat=shield if name=="ESP32_Shield" else pkg if part["height"] else foil
     geo.materials.append(mat)
@@ -266,6 +349,12 @@ for part in parts:
             uv.data[li].uv=((px+.5)/image.size[0],1-(py+.5)/image.size[1])
     groups={}
     for i,(_,weights) in enumerate(records):
+        if name in ("Sensor_T1","Sensor_T2"):
+            weights={"Mount_"+obj["boneName"]:1.0}
+        elif name=="Serpentine_T" and pixels[i] in thumb_edges:
+            weights={thumb_edges[pixels[i]]:1.0}
+        elif name in ("MainFPC","CircuitModule") or kind in ("esp32","power","conditioning"):
+            weights={"WristRoot":1.0}
         total=sum(weights.values())
         for bone,v in weights.items():
             if v<1e-6:continue
@@ -274,7 +363,7 @@ for part in parts:
     obj.modifiers.new("Surface flexion","ARMATURE").object=rig
 
 bpy.context.preferences.filepaths.save_version=0
-bpy.data.objects["HSAD_Metadata"]["modelVersion"]="5.1-thumb-web"
+bpy.data.objects["HSAD_Metadata"]["modelVersion"]="5.3-thumb-flexion"
 bpy.ops.object.select_all(action="SELECT")
 bpy.context.view_layer.objects.active=shell
 bpy.ops.wm.save_as_mainfile(filepath=str(root/"assets/blender/hsad_reference_device.blend"))

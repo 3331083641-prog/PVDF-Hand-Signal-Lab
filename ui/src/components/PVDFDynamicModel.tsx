@@ -63,10 +63,18 @@ function RibbonLayer({
   stress?: StressState
   onFocus: (id: LayerId) => void
 }) {
-  const geometry = useMemo(() => createRibbonGeometry(bend, direction, offset), [bend, direction, offset])
+  const geometry = useMemo(() => {
+    const flat = createRibbonGeometry(0, 1, offset)
+    const bent = createRibbonGeometry(90, 1, offset)
+    flat.morphAttributes.position = [bent.getAttribute('position') as THREE.BufferAttribute]
+    flat.morphAttributes.normal = [bent.getAttribute('normal') as THREE.BufferAttribute]
+    bent.dispose()
+    return flat
+  }, [offset])
+  useEffect(() => () => geometry.dispose(), [geometry])
   const stressColor = stress === '拉伸' ? '#e85b35' : stress === '压缩' ? '#1ba9b8' : '#000000'
   const click = (event: ThreeEvent<PointerEvent>) => { event.stopPropagation(); onFocus(id) }
-  return <mesh geometry={geometry} onPointerDown={click}>
+  return <mesh geometry={geometry} morphTargetInfluences={[direction * bend / 90]} onPointerDown={click}>
     <meshStandardMaterial
       color={color}
       roughness={0.48}
@@ -107,27 +115,35 @@ function ChargeParticles({
   dynamicLevel: number
   stage: MechanismStage
 }) {
-  const group = useRef<THREE.Group>(null)
-  useFrame(({ clock }) => {
-    if (group.current) group.current.position.x = Math.sin(clock.elapsedTime * 2.2) * 0.018 * dynamicLevel
+  const materials = useMemo(() => [0, 1].map(() => new THREE.MeshStandardMaterial({
+    transparent: true, depthWrite: false, opacity: 0, emissiveIntensity: .16,
+  })), [])
+  useEffect(() => () => materials.forEach(m => m.dispose()), [materials])
+  const colors = useMemo(() => [new THREE.Color('#e85b35'), new THREE.Color('#1ba9b8')], [])
+  const reduced = useMemo(() => matchMedia('(prefers-reduced-motion: reduce)'), [])
+  const upperPositive = direction * polarity > 0
+  const quiet = stage === '静止' || stage === '保持'
+  const opacity = quiet ? .10 + .16 * dynamicLevel : .12 + .76 * dynamicLevel
+  useFrame((_, dt) => {
+    const blend = reduced.matches ? 1 : 1 - Math.exp(-dt * 22)
+    materials.forEach((material, i) => {
+      material.color.lerp(colors[upperPositive ? i : 1-i], blend)
+      material.emissive.copy(material.color)
+      material.opacity = THREE.MathUtils.lerp(material.opacity, opacity, blend)
+    })
   })
-  const sign = direction * polarity
-  const upperPositive = sign > 0
-  const opacity = stage === '静止' ? 0.12 : 0.28 + dynamicLevel * 0.72
   const rows = [-0.46, 0, 0.46]
-  return <group ref={group}>{Array.from({ length: 11 }, (_, index) => {
+  return <group>{Array.from({ length: 11 }, (_, index) => {
     const x = -2.35 + index * (4.7 / 10)
     const curve = curveAt(x, bend, direction)
     const z = rows[index % rows.length]
     const scale = 0.62 + dynamicLevel * 0.48
     return <group key={index}>
-      <mesh position={[x, 0.205 + curve, z]} scale={scale}>
+      <mesh position={[x, 0.205 + curve, z]} scale={scale} material={materials[0]}>
         <sphereGeometry args={[0.052, 12, 10]} />
-        <meshStandardMaterial transparent opacity={opacity} color={upperPositive ? '#e85b35' : '#1ba9b8'} emissive={upperPositive ? '#e85b35' : '#1ba9b8'} emissiveIntensity={0.22} />
       </mesh>
-      <mesh position={[x, -0.205 + curve, z]} scale={scale}>
+      <mesh position={[x, -0.205 + curve, z]} scale={scale} material={materials[1]}>
         <sphereGeometry args={[0.052, 12, 10]} />
-        <meshStandardMaterial transparent opacity={opacity} color={upperPositive ? '#1ba9b8' : '#e85b35'} emissive={upperPositive ? '#1ba9b8' : '#e85b35'} emissiveIntensity={0.22} />
       </mesh>
     </group>
   })}</group>
@@ -176,6 +192,16 @@ function BilayerScene({
   lowerStress: StressState
   onFocus: (id: LayerId) => void
 }) {
+  // Interpolate only display curvature, keeping the simulation and graph on their sample clock.
+  const [curve, setCurve] = useState(direction * bend)
+  const reduced = useMemo(() => matchMedia('(prefers-reduced-motion: reduce)'), [])
+  useFrame((_, dt) => {
+    const target = direction * bend
+    if (curve === target) return
+    const next = THREE.MathUtils.damp(curve, target, 30, dt)
+    setCurve(reduced.matches || Math.abs(next-target)<.025 ? target : next)
+  })
+  const visualBend = direction * curve
   const offsets = [0.36, 0.25, 0.14, 0, -0.14, -0.25, -0.36]
   return <>
     <ambientLight intensity={1.45} />
@@ -187,15 +213,15 @@ function BilayerScene({
         id={layer.id}
         color={layer.material}
         offset={offsets[index]}
-        bend={bend}
+        bend={visualBend}
         direction={direction}
         stress={layer.id === 'upper-pvdf' ? upperStress : layer.id === 'lower-pvdf' ? lowerStress : undefined}
         onFocus={onFocus}
       />)}
-      <PolarizationArrows bend={bend} direction={direction} polarity={polarity} />
-      <ChargeParticles bend={bend} direction={direction} polarity={polarity} dynamicLevel={dynamicLevel} stage={stage} />
-      <StressArrows direction={direction} bend={bend} />
-      <ElectrodeLeads bend={bend} direction={direction} />
+      <PolarizationArrows bend={visualBend} direction={direction} polarity={polarity} />
+      <ChargeParticles bend={visualBend} direction={direction} polarity={polarity} dynamicLevel={dynamicLevel} stage={stage} />
+      <StressArrows direction={direction} bend={Math.abs(curve)} />
+      <ElectrodeLeads bend={visualBend} direction={direction} />
       <group position={[0, 1.45, 0]} rotation={[0, 0, direction > 0 ? Math.PI : 0]}>
         <mesh><cylinderGeometry args={[0.022, 0.022, 0.7, 12]} /><meshStandardMaterial color="#e85b35" /></mesh>
         <mesh position={[0, -0.42, 0]}><coneGeometry args={[0.11, 0.25, 16]} /><meshStandardMaterial color="#e85b35" /></mesh>

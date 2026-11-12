@@ -83,9 +83,11 @@ h1[tabindex="-1"]:focus { outline: none; }
 .marker-sensors { top: 28%; right: 16%; }
 .marker-signal { top: 62%; left: 17%; }
 .hero-trace { position: absolute; z-index: 2; left: 12%; right: 8%; top: 50%; height: 2px; background: linear-gradient(90deg, transparent, rgba(27,169,184,.5), transparent); }
-.hero-trace i { position: absolute; width: 7px; height: 7px; top: -2px; border-radius: 50%; background: var(--cyan); animation: trace-flow 3s linear infinite; }
-.hero-trace i:nth-child(2) { animation-delay: 1s; }.hero-trace i:nth-child(3) { animation-delay: 2s; }
-@keyframes trace-flow { from { left: 0; opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } to { left: 100%; opacity: 0; } }
+.hero-trace { overflow: hidden; }
+.hero-trace i { display: none; }
+.hero-trace i:first-child { display: block; height: 2px; width: 100%; background: linear-gradient(90deg, transparent 92%, rgba(27,169,184,.7)); animation: trace-flow 1.6s ease-out 2; opacity: 0; }
+@keyframes trace-flow { 0% { transform: translateX(-100%); opacity: 0; } 15%, 75% { opacity: .8; } 100% { transform: translateX(0); opacity: 0; } }
+
 
 .teaching-route { width: min(1640px, calc(100% - 72px)); margin: 0 auto; padding: 74px 0 88px; }
 .route-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 30px; }
@@ -264,6 +266,16 @@ input[type="range"] { width: 100%; height: 4px; accent-color: var(--orange); cur
   .mapping-bench { display:block; }.bench-wave-panel,.bench-control-panel { overflow:visible; }.bench-control-panel { display:block; }.bench-control-panel > * { margin-top:initial; margin-bottom:initial; }.bench-model-panel { min-height:560px; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }.signal-metrics { grid-template-columns:1fr 1fr; }.mapping-status { grid-template-columns:auto 1fr auto; }.mapping-status small { grid-column:1/4; grid-row:2; }.mapping-status strong { margin-left:auto; }
 }
 
+.signal-traces { animation: trace-reveal 160ms ease-out; }
+@keyframes trace-reveal { from { opacity: .55; } to { opacity: 1; } }
+.signal-metrics b, .mapping-status output, .bench-control-panel output { font-variant-numeric: tabular-nums; }
+.mapping-status span i { transition: background-color 160ms ease; }
+.mapping-status[data-phase="弯曲"] span i { background-color: var(--orange); }
+.mapping-status[data-phase="保持"] span i { background-color: var(--muted); }
+button:not(:disabled) { transition: background-color 150ms, color 150ms, translate 140ms; }
+@media (hover: hover) { button:not(:disabled):hover { translate: 0 -1px; } }
+button:not(:disabled):active { translate: 0 1px; }
+@media (prefers-reduced-motion: reduce) { button:not(:disabled):is(:hover,:active) { translate: none; } }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior:auto !important; animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; }
 }
