@@ -288,7 +288,7 @@ for j in range(33):
         easing=t*t*(3-2*t)
         point[[0,2]]=(1-.75*easing)*point[[0,2]]+.75*easing*(center+ellipse*radius)[[0,2]]
         point[0]-=.10*t
-        point[1]+=.14-1.33*t
+        point[1]+=.14-1.85*t
         point[2]-=.065*t
         verts.append(point)
         warmth=.023*np.sin(angle-.7)+.014*np.cos(3*angle+2*t)
@@ -352,8 +352,39 @@ group.add(list(range(len(verts))),1,"REPLACE")
 wrist.modifiers.new("Wrist motion","ARMATURE").object=rig
 shell.data.materials[0].node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value=(.022,.025,.029,1)
 
+# The black knit sleeve continues past the board before the forearm emerges.
+sleeve_points=[]; sleeve_faces=[]
+for row in range(19):
+    t=row/18
+    for col,v in enumerate(rim):
+        angle=2*np.pi*col/segments
+        scale=.955+.027*np.exp(-((t-.94)/.06)**2)+.008*np.sin(10*angle+5*t)
+        point=center+(v-center)*scale
+        point[0]-=.04*t
+        point[1]+=.065-.94*t
+        sleeve_points.append(point)
+        if row:
+            a=(row-1)*segments+col; b=(row-1)*segments+(col+1)%segments
+            sleeve_faces.append((a,b,b+segments,a+segments))
+sleeve_mesh=bpy.data.meshes.new("Long knitted cuff")
+sleeve_mesh.from_pydata(sleeve_points,[],sleeve_faces)
+sleeve_uv=sleeve_mesh.uv_layers.new(name="Textile")
+for poly in sleeve_mesh.polygons:
+    poly.use_smooth=True
+    for loop in poly.loop_indices:
+        row,col=divmod(sleeve_mesh.loops[loop].vertex_index,segments)
+        seam=col==0 and poly.index%segments==segments-1
+        sleeve_uv.data[loop].uv=(24*(1 if seam else col/segments),4*row/18)
+sleeve=bpy.data.objects.new("Knitted_wrist_sleeve",sleeve_mesh)
+bpy.context.collection.objects.link(sleeve)
+sleeve_mesh.materials.append(shell.data.materials[0])
+sleeve.parent=rig
+group=sleeve.vertex_groups.new(name="WristRoot")
+group.add(list(range(len(sleeve_points))),1,"REPLACE")
+sleeve.modifiers.new("Wrist motion","ARMATURE").object=rig
+
 bpy.context.preferences.filepaths.save_version=0
-bpy.data.objects["HSAD_Metadata"]["modelVersion"]="6.0-worn"
+bpy.data.objects["HSAD_Metadata"]["modelVersion"]="6.1-worn"
 bpy.ops.object.select_all(action="SELECT")
 bpy.context.view_layer.objects.active=shell
 bpy.ops.wm.save_as_mainfile(filepath=str(root/"assets/blender/hsad_reference_device.blend"))

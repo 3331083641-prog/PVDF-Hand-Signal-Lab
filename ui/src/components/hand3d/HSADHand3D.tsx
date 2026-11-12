@@ -13,7 +13,7 @@ import type { JointAngles } from '../../data/mappingPresets'
 
 // Keep both teaching pages on the same reviewed asset. The revision query
 // prevents a browser from reusing the pre-correction GLB after deployment.
-export const HSAD_MODEL_URL = `${import.meta.env.BASE_URL}models/hsad/hsad_reference_device.glb?rev=6.0-worn`
+export const HSAD_MODEL_URL = `${import.meta.env.BASE_URL}models/hsad/hsad_reference_device.glb?rev=6.1-worn`
 
 export type HSADSelection = { type: 'joint' | 'part'; id: string; hit?: { uuid: string; indices: number[]; weights: number[] } }
 export type HSADSelectionEvent = HSADSelection & { clientX: number; clientY: number }
@@ -31,6 +31,8 @@ type HandProps = {
 }
 
 
+
+const wornSpread: Partial<Record<JointId, number>> = { I1: -7, M1: -1, R1: 3, L1: 8 }
 
 const flexAxes: Record<FlexAxis, THREE.Vector3> = {
   x: new THREE.Vector3(1, 0, 0),
@@ -260,6 +262,7 @@ function LoadedHand({ angles, pitch = 0, yaw = 0, roll = 0, selected, onSelect, 
     })
   }, [scene, selected, presentation])
 
+  const spread = useMemo(() => new THREE.Quaternion(), [])
   const flexion = useMemo(() => new THREE.Quaternion(), [])
 
   const targetQuaternion = useMemo(() => new THREE.Quaternion(), [])
@@ -270,7 +273,9 @@ function LoadedHand({ angles, pitch = 0, yaw = 0, roll = 0, selected, onSelect, 
       if (!bone || !rest) return
       const bend = THREE.MathUtils.degToRad((angles[joint.id] ?? 0) * joint.flexSign)
       flexion.setFromAxisAngle(flexAxes[joint.flexAxis], bend)
-      targetQuaternion.copy(rest).multiply(flexion)
+      const splay = presentation === 'device' ? wornSpread[joint.id] ?? 0 : 0
+      spread.setFromAxisAngle(flexAxes.z, THREE.MathUtils.degToRad(splay))
+      targetQuaternion.copy(rest).multiply(spread).multiply(flexion)
       bone.quaternion.slerp(targetQuaternion, 1 - Math.exp(-delta * 8.5))
     })
     // Thumb_CMC is an auxiliary (non-sensing) bone. A restrained in-plane
@@ -285,7 +290,7 @@ function LoadedHand({ angles, pitch = 0, yaw = 0, roll = 0, selected, onSelect, 
     }
     if (root.current) {
       targetQuaternion.setFromEuler(new THREE.Euler(
-        THREE.MathUtils.degToRad(pitch), THREE.MathUtils.degToRad(yaw), THREE.MathUtils.degToRad(roll + (presentation === 'device' ? -23 : 0)), 'YXZ',
+        THREE.MathUtils.degToRad(pitch), THREE.MathUtils.degToRad(yaw), THREE.MathUtils.degToRad(roll + (presentation === 'device' ? -37 : 0)), 'YXZ',
       ))
       root.current.quaternion.slerp(targetQuaternion, 1 - Math.exp(-delta * 7))
     }
