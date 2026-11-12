@@ -13,7 +13,7 @@ import type { JointAngles } from '../../data/mappingPresets'
 
 // Keep both teaching pages on the same reviewed asset. The revision query
 // prevents a browser from reusing the pre-correction GLB after deployment.
-export const HSAD_MODEL_URL = `${import.meta.env.BASE_URL}models/hsad/hsad_reference_device.glb?rev=7.0-fit`
+export const HSAD_MODEL_URL = `${import.meta.env.BASE_URL}models/hsad/hsad_reference_device.glb?rev=7.1-joint-centers`
 
 export type HSADSelection = { type: 'joint' | 'part'; id: string; hit?: { uuid: string; indices: number[]; weights: number[] } }
 export type HSADSelectionEvent = HSADSelection & { clientX: number; clientY: number }

@@ -4,14 +4,14 @@ import bmesh
 import numpy as np
 from mathutils import Vector
 
-# The flexion axes cross the flexible necks between the printed pads.
+# Each sensing pivot sits beneath the printed center of its PVDF pad.
 # Z is depth relative to the middle of the palm, in reference-image pixels.
 DIGITS = {
-    "Index":  ([(337,565,2),(355,401,5),(367,242,1),(375,126,-4)], [43,39,34,28]),
-    "Middle": ([(242,557,4),(253,373,7),(263,207,2),(268,87,-4)], [46,41,35,29]),
-    "Ring":   ([(155,563,1),(155,386,4),(155,232,0),(156,116,-6)], [42,38,34,28]),
-    "Little": ([(74,585,-3),(73,434,0),(72,301,-3),(69,190,-9)], [38,35,31,26]),
-    "Thumb":  ([(331,793,-14),(472,711,-10),(579,577,-13),(666,466,-21)], [76,49,39,32]),
+    "Index":  ([(343,500,2),(359,306,5),(370,190,1),(375,126,-4)], [43,39,34,28]),
+    "Middle": ([(246,484,4),(258,270,7),(265,151,2),(268,87,-4)], [46,41,35,29]),
+    "Ring":   ([(155,494,1),(155,291,4),(156,177,0),(156,116,-6)], [42,38,34,28]),
+    "Little": ([(73,516,-3),(73,357,0),(71,253,-3),(69,190,-9)], [38,35,31,26]),
+    "Thumb":  ([(331,793,-14),(528,646,-10),(641,501,-13),(666,466,-21)], [76,49,39,32]),
 }
 
 
@@ -141,8 +141,7 @@ def sculpt(shell):
 
 
 def bind(shell,points):
-    # Blend adjacent chains across webbing. Along each shaft the rigid pad
-    # regions are separated by smooth flexion bands centered on the meanders.
+    # Blend adjacent chains across webbing. The dorsal laminate follows the same weights.
     distances,progress,breaks = [],[],[]
     for path,_ in DIGITS.values():
         path=np.array(path,dtype=float)[:,:2]
@@ -172,22 +171,10 @@ def bind(shell,points):
         if finger=="Thumb":
             heel=np.clip(1-progress[i]/110,0,1)
             strength=strength*(1-heel*np.clip((dist[i]-53)/58,0,1))
-        # The dorsal hinge bands end in the die-cut necks. Palmar fabric
-        # bends over a wider arc and has no rigid sensor laminate.
-        dorsal=np.clip((points[:,2]+8)/25,0,1)
-        spans={
-            "Index": ((34,8),(30,33),(9,6)),
-            "Middle":((34,16),(42,45),(9,7)),
-            "Ring":  ((32,10),(44,36),(8,9)),
-            "Little":((30,6),(21,22),(4,8)),
-            "Thumb": ((63,63),(38,20),(20,32)),
-        }[finger]
+        # Share flexion across the full dorsal pad and both adjacent phalanges.
         after=[]
-        for j,(proximal,distal) in enumerate(spans):
-            palm_span=(55,37,24)[j]
-            pre=palm_span*(1-dorsal)+proximal*dorsal
-            post=palm_span*(1-dorsal)+distal*dorsal
-            u=np.clip((progress[i]-breaks[i][j]+pre)/(pre+post),0,1)
+        for j,half_width in enumerate((70,55,43)):
+            u=np.clip(.5+(progress[i]-breaks[i][j])/(2*half_width),0,1)
             after.append(strength*u*u*(3-2*u))
         groups["WristRoot"]-=after[0]
         for j,name in enumerate(names):

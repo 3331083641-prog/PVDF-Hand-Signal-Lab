@@ -333,7 +333,7 @@ group.add(list(range(len(sleeve_points))),1,"REPLACE")
 sleeve.modifiers.new("Wrist motion","ARMATURE").object=rig
 
 bpy.context.preferences.filepaths.save_version=0
-bpy.data.objects["HSAD_Metadata"]["modelVersion"]="7.0-fit"
+bpy.data.objects["HSAD_Metadata"]["modelVersion"]="7.1-joint-centers"
 bpy.ops.object.select_all(action="SELECT")
 bpy.context.view_layer.objects.active=shell
 bpy.ops.wm.save_as_mainfile(filepath=str(root/"assets/blender/hsad_reference_device.blend"))
