@@ -13,7 +13,7 @@ import type { JointAngles } from '../../data/mappingPresets'
 
 // Keep both teaching pages on the same reviewed asset. The revision query
 // prevents a browser from reusing the pre-correction GLB after deployment.
-export const HSAD_MODEL_URL = `${import.meta.env.BASE_URL}models/hsad/hsad_reference_device.glb?rev=7.2-hand-contours`
+export const HSAD_MODEL_URL = `${import.meta.env.BASE_URL}models/hsad/hsad_reference_device.glb?rev=8.0-rigid-mounts`
 
 export type HSADSelection = { type: 'joint' | 'part'; id: string; hit?: { uuid: string; indices: number[]; weights: number[] } }
 export type HSADSelectionEvent = HSADSelection & { clientX: number; clientY: number }
@@ -293,13 +293,15 @@ function LoadedHand({ angles, pitch = 0, yaw = 0, roll = 0, selected, onSelect, 
       spread.setFromAxisAngle(flexAxes.z, THREE.MathUtils.degToRad(splay))
       twist.setFromAxisAngle(flexAxes.y, THREE.MathUtils.degToRad((fingerRoll[joint.id] ?? 0) * closure))
       bone.quaternion.copy(rest).multiply(spread).multiply(twist).multiply(flexion)
+      const mount = scene.getObjectByName('Mount_' + joint.boneNode)
+      if (mount) mount.quaternion.copy(rest).slerp(bone.quaternion, .5)
     })
     const thumbCmc = scene.getObjectByName('Thumb_CMC')
     if (thumbCmc && thumbCmcRest) {
       const opposition = THREE.MathUtils.smoothstep(displayedAngles.current.T1 ?? 0, 3, 48)
-      spread.setFromAxisAngle(flexAxes.z, THREE.MathUtils.degToRad(4 - 16 * opposition))
-      twist.setFromAxisAngle(flexAxes.y, THREE.MathUtils.degToRad(12 + 11 * opposition))
-      flexion.setFromAxisAngle(flexAxes.x, THREE.MathUtils.degToRad(-4 - 45 * opposition))
+      spread.setFromAxisAngle(flexAxes.z, THREE.MathUtils.degToRad(4 - 11 * opposition))
+      twist.setFromAxisAngle(flexAxes.y, THREE.MathUtils.degToRad(12 + 19 * opposition))
+      flexion.setFromAxisAngle(flexAxes.x, THREE.MathUtils.degToRad(-4 - 43 * opposition))
       thumbCmc.quaternion.copy(thumbCmcRest).multiply(spread).multiply(twist).multiply(flexion)
     }
     if (root.current) {

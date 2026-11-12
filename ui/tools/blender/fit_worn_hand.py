@@ -11,7 +11,7 @@ DIGITS = {
     "Middle": ([(246,484,4),(258,270,7),(265,151,2),(268,87,-4)], [42,38,33,27]),
     "Ring":   ([(155,494,1),(155,291,4),(156,177,0),(156,116,-6)], [38,34,30,25]),
     "Little": ([(73,516,-3),(73,357,0),(71,253,-3),(69,190,-9)], [32,29,26,24]),
-    "Thumb":  ([(331,793,-14),(528,646,-10),(641,501,-13),(666,466,-21)], [76,49,39,32]),
+    "Thumb":  ([(354,782,-20),(528,646,-10),(641,501,-13),(666,466,-21)], [76,49,39,32]),
 }
 
 
@@ -19,7 +19,7 @@ def world(points):
     return (np.asarray(points) - [215,654,0]) * [1/110,-1/110,1/110]
 
 
-def register_rig(rig):
+def register_rig(rig, pad_bones):
     bpy.context.view_layer.objects.active = rig
     rig.select_set(True)
     bpy.ops.object.mode_set(mode="EDIT")
@@ -29,7 +29,21 @@ def register_rig(rig):
             bone = rig.data.edit_bones[f"{finger}_{name}"]
             bone.head, bone.tail = Vector(a), Vector(b)
             bone.align_roll(Vector((0,0,1)))
+    for name in pad_bones.values():
+        joint=rig.data.edit_bones[name]
+        mount=rig.data.edit_bones.new("Mount_"+name)
+        mount.parent=joint.parent
+        mount.head,mount.tail=joint.head.copy(),joint.tail.copy()
+        mount.roll=joint.roll
     bpy.ops.object.mode_set(mode="OBJECT")
+    for name in pad_bones.values():
+        mount=rig.pose.bones["Mount_"+name]
+        follow=mount.constraints.new("COPY_TRANSFORMS")
+        follow.target=rig
+        follow.subtarget=name
+        follow.target_space=follow.owner_space="LOCAL"
+        follow.influence=.5
+
 
 
 def union(a,b,width):
@@ -64,7 +78,7 @@ def surface_nets(field, origin, step):
     return points,faces
 
 
-def sculpt(shell):
+def sculpt(shell, pads):
     origin = np.array([-14,40,-108])
     step = 4
     x,y,z = [origin[i]+v*step for i,v in enumerate(np.ogrid[:187,:228,:55])]
@@ -79,7 +93,6 @@ def sculpt(shell):
     hollow=14*np.exp(-((x-206)/88)**2-((y-680)/122)**2)
     upper=depth+5*np.exp(-((x-230)/103)**2-((y-563)/86)**2)
     lower=depth-hollow
-    central_z=(upper-lower)/2
     # Follow the main palmar flexion folds only on the volar surface.
     # Textile rounds these landmarks so they read as shallow depressions.
     for level,slope,amplitude in [(563,.19,5.0),(621,-.16,4.5)]:
@@ -98,6 +111,7 @@ def sculpt(shell):
 
     for args,blend in [
         ((335,741,-27,73,121,43,-.51),36), ((104,716,-22,52,118,36,.20),30),
+        ((416,743,-14,96,51,38,-.61),25),
         ((111,524,0,51,39,22,.12),16), ((200,504,2,56,34,24,-.10),16),
         ((295,505,4,57,38,25,.16),16),
     ]:
@@ -111,8 +125,10 @@ def sculpt(shell):
     upper=np.interp(x,curve[:,0],curve[:,1])
     lower=np.interp(x,[350,410,472,540],[809,792,747,658])
     half=(lower-upper)/2
-    web=(np.sqrt(((y-(upper+lower)/2)/half)**2+((z+9)/29)**2)-1)*29
-    field=union(field,np.maximum(web,np.maximum(350-x,x-540)),14)
+    # Round off the membrane ends inside the palm and thumb shaft.
+    end=np.maximum(np.maximum(346-x,x-528),0)/30
+    web=(np.sqrt(((y-(upper+lower)/2)/half)**2+((z+9)/29)**2+end**2)-1)*29
+    field=union(field,web,19)
 
     for finger,(path,radii) in DIGITS.items():
         if finger!="Thumb":
@@ -166,10 +182,10 @@ def sculpt(shell):
         for j in face.loop_indices:
             p = points[mesh.loops[j].vertex_index]
             uv.data[j].uv = (4*p[axes[0]],4*p[axes[1]])
-    bind(shell,pixels)
+    bind(shell,pixels,pads)
 
 
-def bind(shell,points):
+def bind(shell,points,pads):
     # Blend adjacent chains across webbing. The dorsal laminate follows the same weights.
     distances,progress,breaks = [],[],[]
     for path,_ in DIGITS.values():
@@ -189,12 +205,15 @@ def bind(shell,points):
         progress.append(np.choose(seg,ts))
         breaks.append(along)
     dist=np.array(distances)
-    affinity=np.exp(-(dist**2-dist.min(axis=0)**2)/(21**2))
+    web_width=21+36*np.exp(-((points[:,0]-379)/81)**4-((points[:,1]-659)/110)**4)
+    web_width+=28*np.exp(-((points[:,1]-467)/49)**2)
+    affinity=np.exp(-(dist**2-dist.min(axis=0)**2)/web_width**2)
     affinity/=affinity.sum(axis=0)
     # Beyond the web, every shaft belongs exclusively to its own chain.
-    free=(points[:,1]<458) & (points[:,0]<396)
-    nearest=dist[:,free].argmin(axis=0)
-    affinity[:,free]=np.eye(len(DIGITS))[nearest].T
+    free=np.clip((443-points[:,1])/40,0,1)*np.clip((420-points[:,0])/24,0,1)
+    free=free*free*(3-2*free)
+    own=np.eye(len(DIGITS))[dist.argmin(axis=0)].T
+    affinity=affinity*(1-free)+own*free
     groups={"WristRoot":np.ones(len(points))}
     for i,finger in enumerate(DIGITS):
         names=("CMC","MCP","IP") if finger=="Thumb" else ("MCP","PIP","DIP")
@@ -212,6 +231,34 @@ def bind(shell,points):
         groups["WristRoot"]-=after[0]
         for j,name in enumerate(names):
             groups[f"{finger}_{name}"]=after[j]-(after[j+1] if j<2 else 0)
+    # Each joint has a dorsal mounting area that shares the half-angle
+    # frame of the rigid sensor. Fade back to ordinary skinning at its rim.
+    from mathutils.geometry import convex_hull_2d
+    masks=[]
+    for bone,pad in pads.items():
+        xy=np.array(pad["points"])
+        hull=xy[convex_hull_2d([Vector(v) for v in xy])]
+        edges=np.roll(hull,-1,axis=0)-hull
+        orient=np.sign(np.sum(hull[:,0]*edges[:,1]-hull[:,1]*edges[:,0]))
+        outside=np.full(len(points),-np.inf)
+        for start,edge in zip(hull,edges):
+            if np.linalg.norm(edge)<1e-6: continue
+            dx,dy=(points[:,:2]-start).T
+            outside=np.maximum(outside,orient*(dx*edge[1]-dy*edge[0])/np.linalg.norm(edge))
+        u=np.clip((outside-5)/23,0,1)
+        strength=1-u*u*(3-2*u)
+        reference_z=next(p[2] for finger,(path,_) in DIGITS.items()
+                         for p,j in zip(path,("CMC","MCP","IP") if finger=="Thumb" else ("MCP","PIP","DIP"))
+                         if finger+"_"+j==bone)
+        dorsal=np.clip((points[:,2]-reference_z+12)/18,0,1)
+        masks.append(strength*dorsal*dorsal*(3-2*dorsal))
+    masks=np.array(masks)
+    # Preserve a single rigid influence under each pad, including close neighbours.
+    peak=masks.max(axis=0)
+    masks=masks**6
+    masks*=peak/np.maximum(masks.sum(axis=0),1e-30)
+    for key in groups: groups[key]*=1-peak
+    for name,mask in zip(pads,masks): groups["Mount_"+name]=mask
     weights=np.maximum(np.array(list(groups.values())).T,0)
     # Four influences are preserved by both glTF export and Three.js skinning.
     keep=np.argsort(weights,axis=1)[:,-4:]

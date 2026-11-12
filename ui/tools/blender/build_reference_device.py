@@ -29,8 +29,9 @@ def xy(uv):
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from fit_worn_hand import register_rig, sculpt
 
-register_rig(rig)
-sculpt(shell)
+pad_bones={p["name"]:old_meta[p["name"]]["boneName"] for p in parts if p["kind"]=="sensor"}
+register_rig(rig,pad_bones)
+sculpt(shell,{pad_bones[p["name"]]:p for p in parts if p["kind"]=="sensor"})
 # Shape the knit binding around the same tapered wrist cross section.
 for vertex in cuff.data.vertices:
     x,y,z=vertex.co
@@ -65,7 +66,7 @@ def support(p):
     normal=(b-a).cross(c-a).normalized()
     if normal.z<0: normal.negate()
     weights=dict(sorted(weights.items(),key=lambda item:-item[1])[:4])
-    return tuple(loc+normal*.018),weights
+    return tuple(loc+normal*.015),weights
 
 image=bpy.data.images.load(str(root/"assets/reference/hsad_fpc_front.png"))
 image.pack()
@@ -148,7 +149,25 @@ for side in (-1,1):
 
 from functools import lru_cache
 support= lru_cache(maxsize=None)(support)
+def refine_surface(part):
+    # Adjacent parts use identical edge midpoints, including along pad necks.
+    points=list(part["points"])
+    midpoints={}
+    def mid(a,b):
+        key=tuple(sorted((a,b)))
+        if key not in midpoints:
+            midpoints[key]=len(points)
+            points.append([(x+y)/2 for x,y in zip(points[a],points[b])])
+        return midpoints[key]
+    faces=[]
+    for a,b,c in part["faces"]:
+        u,v,w=mid(a,b),mid(b,c),mid(c,a)
+        faces.extend([(a,u,w),(u,b,v),(w,v,c),(u,v,w)])
+    sides=[tuple(sorted(edge)) for a,b in part["sides"] for edge in ((a,mid(a,b)),(mid(a,b),b))]
+    return {**part,"points":points,"faces":faces,"sides":sides}
+
 for part in parts:
+    part=refine_surface(part)
     name,kind=part["name"],part["kind"]
     pixels=[tuple(p) for p in part["points"]]
     records=[support(p) for p in pixels]
@@ -180,7 +199,7 @@ for part in parts:
     obj["hsadPartId"]=kind
     if kind=="sensor":
         for k,val in old_meta[name].items(): obj[k]=val
-        bone=obj["boneName"]
+        bone="Mount_"+obj["boneName"]
         for tag in (obj["anatomicalNodeName"],"Highlight_"+obj["hsadJointId"]):
             a=anchor(tag,center,None,bone)
             a["hsadJointId"]=obj["hsadJointId"]
@@ -196,6 +215,7 @@ for part in parts:
             uv.data[li].uv=((px+.5)/image.size[0],1-(py+.5)/image.size[1])
     groups={}
     for i,(_,weights) in enumerate(records):
+        if kind=="sensor": weights={"Mount_"+pad_bones[name]:1.0}
         total=sum(weights.values())
         for bone,v in weights.items():
             if v<1e-6:continue
@@ -333,7 +353,7 @@ group.add(list(range(len(sleeve_points))),1,"REPLACE")
 sleeve.modifiers.new("Wrist motion","ARMATURE").object=rig
 
 bpy.context.preferences.filepaths.save_version=0
-bpy.data.objects["HSAD_Metadata"]["modelVersion"]="7.2-hand-contours"
+bpy.data.objects["HSAD_Metadata"]["modelVersion"]="8.0-rigid-mounts"
 bpy.ops.object.select_all(action="SELECT")
 bpy.context.view_layer.objects.active=shell
 bpy.ops.wm.save_as_mainfile(filepath=str(root/"assets/blender/hsad_reference_device.blend"))

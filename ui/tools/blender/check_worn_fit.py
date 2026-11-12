@@ -38,7 +38,7 @@ def pose(fraction):
                 q = turn(2,a+(b-a)*t) @ turn(1,roll*t) @ q
             rig.pose.bones[f"{finger}_{suffix}"].rotation_quaternion = q
     t = smooth((4+44*fraction-3)/45)
-    rig.pose.bones["Thumb_CMC"].rotation_quaternion = turn(2,4-16*t) @ turn(1,12+11*t) @ turn(0,-4-45*t)
+    rig.pose.bones["Thumb_CMC"].rotation_quaternion = turn(2,4-11*t) @ turn(1,12+19*t) @ turn(0,-4-43*t)
     bpy.context.view_layer.update()
 
 
@@ -70,6 +70,7 @@ def film_strain(obj,graph):
 
 parts = [obj for obj in bpy.context.scene.objects if obj.type=="MESH" and obj.get("hsadPartId") in ("sensor","serpentine")]
 assert len(parts)==19
+dot_samples={}
 for pad in [o for o in parts if o["hsadPartId"]=="sensor"]:
     pivot=rig.data.bones[pad["boneName"]].head_local
     xyz=np.array([tuple(pad.matrix_world @ v.co) for v in pad.data.vertices])
@@ -93,6 +94,7 @@ for pad in [o for o in parts if o["hsadPartId"]=="sensor"]:
     error=np.linalg.norm(pixel-dots[code[0]][int(code[1])-1])
     print(f"{pad.name} dot alignment: {error:.2f} reference pixels")
     assert error<2
+    dot_samples[pad.name]=(tris[idx],Vector((1-u-v,u,v)),hit.copy())
 # Identify free finger surfaces in rest space once, then test the same
 # triangles on the evaluated mesh as the hand closes.
 shell.data.calc_loop_triangles()
@@ -111,11 +113,33 @@ def check_fingers(graph):
     b=BVHTree.FromPolygons(posed,ring,all_triangles=True)
     assert not a.overlap(b), "Little and ring finger surfaces intersect"
 
+thumb=tri[np.all(rest_pixels[tri,0]>465,axis=1)].tolist()
+others=tri[np.all(rest_pixels[tri,0]<391,axis=1)].tolist()
+def thumb_overlaps(graph):
+    xyz=[v.co[:] for v in shell.evaluated_get(graph).data.vertices]
+    return BVHTree.FromPolygons(xyz,thumb,all_triangles=True).overlap(BVHTree.FromPolygons(xyz,others,all_triangles=True))
+def check_shell(graph):
+    xyz=[v.co[:] for v in shell.evaluated_get(graph).data.vertices]
+    tree=BVHTree.FromPolygons(xyz,tri.tolist(),all_triangles=True)
+    for a,b in tree.overlap(tree):
+        if a<b and not np.intersect1d(tri[a],tri[b]).size:
+            raise AssertionError(f"Glove self-intersection between triangles {a} and {b}")
+
 worst = 0
 for fraction in (0,.25,.5,.75,1):
     pose(fraction)
     graph = bpy.context.evaluated_depsgraph_get()
     check_fingers(graph)
+    check_shell(graph)
+    assert not thumb_overlaps(graph), "Thumb intersects fingers or palm"
+    for name,(indices,weights,rest_hit) in dot_samples.items():
+        pad=bpy.data.objects[name]
+        evaluated=pad.evaluated_get(graph)
+        posed=sum((weights[j]*(evaluated.matrix_world@evaluated.data.vertices[i].co) for j,i in enumerate(indices)),Vector())
+        joint=rig.pose.bones[pad["boneName"]]
+        mount=rig.pose.bones["Mount_"+joint.name]
+        offset=mount.matrix.to_3x3() @ mount.bone.matrix_local.to_3x3().inverted() @ (rest_hit-joint.bone.head_local)
+        assert (posed-joint.head-offset).length<1e-4, "Pad center slipped at joint"
     tree = BVHTree.FromObject(shell,graph)
     assert shell.matrix_world.is_identity
     for kind in ("sensor","serpentine"):
@@ -123,7 +147,7 @@ for fraction in (0,.25,.5,.75,1):
         worst=max(worst,float(np.max(np.abs(vals))))
         print(f"POSE {fraction:.2f} {kind:10s} samples={len(vals)} p95_abs={np.percentile(abs(vals),95):.4f} min={min(vals):.4f} max={max(vals):.4f}")
     stretch = np.concatenate([film_strain(o,graph) for o in parts if o["hsadPartId"]=="sensor"])
-    # Joint-spanning flexible pads change length as the glove bends.
+    assert max(stretch)<.0002, "Sensor shape changed"
     print(f"PAD strain p95={np.percentile(stretch,95):.4f} max={max(stretch):.4f}")
 print(f"WORST absolute clearance {worst:.4f} Blender units")
 assert worst<.018, "Attachment error exceeds two reference-image pixels"
