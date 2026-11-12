@@ -3,6 +3,7 @@ Register the glove to the photographed FPC, preserving the photograph's XY scale
 """
 import json
 import sys
+from math import radians
 from pathlib import Path
 
 import bpy
@@ -84,6 +85,10 @@ for name,h,t in rest:
     h.xy=warp([h.x,h.y])[0]
     t.xy=warp([t.x,t.y])[0]
     bone.head,bone.tail=h,t
+# The viewer flexes about local -X. Roll the two flexion frames toward
+# the palm without moving their pivots, changing bone lengths or posing the glove.
+for name in ("Thumb_MCP","Thumb_IP"):
+    rig.data.edit_bones[name].roll += radians(30)
 bpy.ops.object.mode_set(mode="OBJECT")
 bpy.context.view_layer.update()
 mesh=shell.data
