@@ -782,158 +782,81 @@ h1[tabindex="-1"]:focus {
   transition: opacity 0.2s ease;
 }
 
-/* Laser Scanline Effect */
-.glove-laser-scanline {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.95), transparent);
-  box-shadow: 0 0 14px 2px rgba(56, 189, 248, 0.75), 0 0 4px 1px #fff;
-  z-index: 5;
-  pointer-events: none;
-  animation: laser-sweep 4s ease-in-out infinite alternate;
-}
-
-@keyframes laser-sweep {
-  0% { top: 6%; opacity: 0.2; }
-  15% { opacity: 0.95; }
-  85% { opacity: 0.95; }
-  100% { top: 92%; opacity: 0.2; }
-}
-
-.visual-img-wrap {
+/* SVG Interactive Image Map (100% Locked to Physical Glove Sensors) */
+.glove-interactive-svg {
   width: 100%;
   height: 100%;
-}
-
-.hero-device-visual img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: 60% center;
   display: block;
 }
 
-/* Layer Filter Toolbar Overlaid on Photo */
-.glove-layer-toolbar {
-  position: absolute;
-  top: 16px;
-  left: 36px;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 4px;
-  border-radius: var(--radius-sm);
-  background: rgba(12, 43, 69, 0.88);
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  box-shadow: 0 4px 12px rgba(12, 43, 69, 0.2);
-}
-
-.glove-layer-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 8px;
-  border-radius: 3px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: #94a3b8;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  white-space: nowrap;
-}
-
-.glove-layer-btn:hover {
-  color: #f1f5f9;
-}
-
-.glove-layer-btn.is-active {
-  color: #38bdf8;
-  background: rgba(56, 189, 248, 0.15);
-  border-color: rgba(56, 189, 248, 0.35);
-}
-
-/* Interactive Hotspot Nodes */
-.glove-hotspots-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 6;
+.svg-laser-line {
+  stroke: #38bdf8;
+  stroke-width: 3.5;
+  filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.95)) drop-shadow(0 0 3px #ffffff);
+  animation: svg-laser-sweep 4.5s ease-in-out infinite alternate;
   pointer-events: none;
 }
 
-.glove-node-point {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  pointer-events: auto;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: transparent;
-  border: 0;
-  padding: 0;
-  cursor: pointer;
-  transition: transform 0.15s ease;
+@keyframes svg-laser-sweep {
+  0% { transform: translateY(80px); opacity: 0.15; }
+  15% { opacity: 0.95; }
+  85% { opacity: 0.95; }
+  100% { transform: translateY(860px); opacity: 0.15; }
 }
 
-.glove-node-point:hover,
-.glove-node-point.is-selected {
-  transform: translate(-50%, -50%) scale(1.35);
-  z-index: 8;
+.svg-node-group {
+  outline: none;
+  transition: transform 0.15s ease-out;
 }
 
-.node-ping {
-  position: absolute;
-  inset: -4px;
-  border-radius: 50%;
-  border: 1.5px solid #38bdf8;
+.svg-node-group:hover,
+.svg-node-group.is-selected {
+  transform-origin: center;
+}
+
+.svg-node-ping {
+  fill: none;
+  stroke: #38bdf8;
+  stroke-width: 2;
   opacity: 0;
-  animation: radar-ping 2.2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  animation: svg-radar-ping 2.2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  pointer-events: none;
 }
 
-@keyframes radar-ping {
-  0% { transform: scale(0.6); opacity: 0.9; }
-  75%, 100% { transform: scale(1.9); opacity: 0; }
+@keyframes svg-radar-ping {
+  0% { r: 8; opacity: 0.95; }
+  75%, 100% { r: 28; opacity: 0; }
 }
 
-.node-core {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: #0284c7;
-  border: 2px solid #ffffff;
-  box-shadow: 0 0 8px rgba(2, 132, 199, 0.6);
-  display: grid;
-  place-items: center;
+.svg-node-core {
+  fill: #0284c7;
+  stroke: #ffffff;
+  stroke-width: 2.2;
+  filter: drop-shadow(0 0 6px rgba(2, 132, 199, 0.8));
   transition: all 0.18s ease;
 }
 
-.node-core small {
+.svg-node-group:hover .svg-node-core,
+.svg-node-group.is-selected .svg-node-core {
+  fill: #d97706;
+  stroke: #fef3c7;
+  filter: drop-shadow(0 0 12px #d97706);
+  r: 12;
+}
+
+.svg-node-group.is-mcu .svg-node-core {
+  fill: #059669;
+  stroke: #d1fae5;
+  filter: drop-shadow(0 0 10px #059669);
+}
+
+.svg-node-text {
   font-family: var(--font-mono);
   font-size: 8px;
   font-weight: 900;
-  color: #ffffff;
-  line-height: 1;
-}
-
-.glove-node-point.is-selected .node-core {
-  background: #d97706;
-  border-color: #fef3c7;
-  box-shadow: 0 0 12px #d97706;
-}
-
-.glove-node-point.is-mcu .node-core {
-  width: 18px;
-  height: 18px;
-  background: #059669;
-  border-color: #d1fae5;
-  box-shadow: 0 0 10px #059669;
+  fill: #ffffff;
+  pointer-events: none;
+  user-select: none;
 }
 
 /* Floating Telemetry HUD Card on Hover */

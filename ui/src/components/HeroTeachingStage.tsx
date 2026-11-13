@@ -19,35 +19,41 @@ interface GloveHotspot {
   id: string
   label: string
   type: 'dip-pip' | 'mcp' | 'mcu'
-  x: number // percentage
-  y: number // percentage
+  px: number // Native pixel X on 1672x941 image
+  py: number // Native pixel Y on 1672x941 image
   channels: string
   diff: string
   role: string
 }
 
+// Measured pixel coordinates on the 1672 x 941 image
 const GLOVE_HOTSPOTS: GloveHotspot[] = [
-  // Thumb
-  { id: 'T2', label: '拇指 IP', type: 'dip-pip', x: 23, y: 55, channels: 'CH1/CH2', diff: 'D1', role: '指间关节' },
-  { id: 'T1', label: '拇指 MCP', type: 'mcp', x: 31, y: 68, channels: 'CH3/CH4', diff: 'D2', role: '掌指关节' },
-  // Index
-  { id: 'I3', label: '食指 DIP', type: 'dip-pip', x: 39, y: 22, channels: 'CH5/CH6', diff: 'D3', role: '远端指间' },
-  { id: 'I2', label: '食指 PIP', type: 'dip-pip', x: 42, y: 35, channels: 'CH7/CH8', diff: 'D4', role: '近端指间' },
-  { id: 'I1', label: '食指 MCP', type: 'mcp', x: 45, y: 53, channels: 'CH9/CH10', diff: 'D5', role: '掌指关节' },
-  // Middle
-  { id: 'M3', label: '中指 DIP', type: 'dip-pip', x: 52, y: 15, channels: 'CH11/CH12', diff: 'D6', role: '远端指间' },
-  { id: 'M2', label: '中指 PIP', type: 'dip-pip', x: 53, y: 30, channels: 'CH13/CH14', diff: 'D7', role: '近端指间' },
-  { id: 'M1', label: '中指 MCP', type: 'mcp', x: 54, y: 50, channels: 'CH15/CH16', diff: 'D8', role: '掌指关节' },
-  // Ring
-  { id: 'R3', label: '无名指 DIP', type: 'dip-pip', x: 65, y: 23, channels: 'CH17/CH18', diff: 'D9', role: '远端指间' },
-  { id: 'R2', label: '无名指 PIP', type: 'dip-pip', x: 65, y: 36, channels: 'CH19/CH20', diff: 'D10', role: '近端指间' },
-  { id: 'R1', label: '无名指 MCP', type: 'mcp', x: 64, y: 53, channels: 'CH21/CH22', diff: 'D11', role: '掌指关节' },
-  // Little
-  { id: 'L3', label: '小指 DIP', type: 'dip-pip', x: 77, y: 35, channels: 'CH23/CH24', diff: 'D12', role: '远端指间' },
-  { id: 'L2', label: '小指 PIP', type: 'dip-pip', x: 76, y: 46, channels: 'CH25/CH26', diff: 'D13', role: '近端指间' },
-  { id: 'L1', label: '小指 MCP', type: 'mcp', x: 74, y: 59, channels: 'CH27/CH28', diff: 'D14', role: '掌指关节' },
-  // MCU
-  { id: 'MCU', label: 'ESP32-S3 主控板', type: 'mcu', x: 54, y: 84, channels: '28路 ADC', diff: '80Hz', role: '差分调理/主控' },
+  // Thumb (拇指)
+  { id: 'T2', label: '拇指 IP', type: 'dip-pip', px: 1402, py: 680, channels: 'CH1/CH2', diff: 'D1', role: '指间关节' },
+  { id: 'T1', label: '拇指 MCP', type: 'mcp', px: 1229, py: 775, channels: 'CH3/CH4', diff: 'D2', role: '掌指关节' },
+
+  // Index finger (食指)
+  { id: 'I3', label: '食指 DIP', type: 'dip-pip', px: 1437, py: 338, channels: 'CH5/CH6', diff: 'D3', role: '远端指间' },
+  { id: 'I2', label: '食指 PIP', type: 'dip-pip', px: 1312, py: 418, channels: 'CH7/CH8', diff: 'D4', role: '近端指间' },
+  { id: 'I1', label: '食指 MCP', type: 'mcp', px: 1196, py: 517, channels: 'CH9/CH10', diff: 'D5', role: '掌指关节' },
+
+  // Middle finger (中指)
+  { id: 'M3', label: '中指 DIP', type: 'dip-pip', px: 1378, py: 235, channels: 'CH11/CH12', diff: 'D6', role: '远端指间' },
+  { id: 'M2', label: '中指 PIP', type: 'dip-pip', px: 1215, py: 295, channels: 'CH13/CH14', diff: 'D7', role: '近端指间' },
+  { id: 'M1', label: '中指 MCP', type: 'mcp', px: 1129, py: 414, channels: 'CH15/CH16', diff: 'D8', role: '掌指关节' },
+
+  // Ring finger (无名指)
+  { id: 'R3', label: '无名指 DIP', type: 'dip-pip', px: 1278, py: 185, channels: 'CH17/CH18', diff: 'D9', role: '远端指间' },
+  { id: 'R2', label: '无名指 PIP', type: 'dip-pip', px: 1180, py: 275, channels: 'CH19/CH20', diff: 'D10', role: '近端指间' },
+  { id: 'R1', label: '无名指 MCP', type: 'mcp', px: 1065, py: 376, channels: 'CH21/CH22', diff: 'D11', role: '掌指关节' },
+
+  // Little finger (小指)
+  { id: 'L3', label: '小指 DIP', type: 'dip-pip', px: 1135, py: 228, channels: 'CH23/CH24', diff: 'D12', role: '远端指间' },
+  { id: 'L2', label: '小指 PIP', type: 'dip-pip', px: 1055, py: 325, channels: 'CH25/CH26', diff: 'D13', role: '近端指间' },
+  { id: 'L1', label: '小指 MCP', type: 'mcp', px: 995, py: 423, channels: 'CH27/CH28', diff: 'D14', role: '掌指关节' },
+
+  // MCU (ESP32-S3 + CH340K)
+  { id: 'MCU', label: 'ESP32-S3 主控板', type: 'mcu', px: 920, py: 620, channels: '28路 ADC', diff: '80Hz', role: '差分调理/主控' },
 ]
 
 export function HeroTeachingStage() {
@@ -67,9 +73,8 @@ export function HeroTeachingStage() {
     const rect = visualRef.current.getBoundingClientRect()
     const px = Math.min(100, Math.max(0, ((e.clientX - rect.left) / rect.width) * 100))
     const py = Math.min(100, Math.max(0, ((e.clientY - rect.top) / rect.height) * 100))
-    // Calculate 3D tilt angles (limit to -8 to +8 deg)
-    const rx = ((py - 50) / 50) * -7
-    const ry = ((px - 50) / 50) * 8
+    const rx = ((py - 50) / 50) * -6
+    const ry = ((px - 50) / 50) * 7
     setTilt({ rx, ry, px, py, isHover: true })
     setCoord({
       x: Number((80 + px * 1.15).toFixed(1)),
@@ -138,7 +143,7 @@ export function HeroTeachingStage() {
           </button>
         </div>
 
-        {/* Crisp Scientific Telemetry Matrix (Subtitles removed) */}
+        {/* Crisp Scientific Telemetry Matrix */}
         <dl className="hero-facts">
           <div className="fact-item">
             <dt>检测单元</dt>
@@ -186,13 +191,47 @@ export function HeroTeachingStage() {
           />
         )}
 
-        {/* Laser / Radar Scanline */}
-        {scanning && <div className="glove-laser-scanline" />}
+        {/* SVG Interactive Image Map (100% Locked to Physical Glove Sensors) */}
+        <svg
+          viewBox="0 0 1672 941"
+          preserveAspectRatio="xMaxYMid slice"
+          className="glove-interactive-svg"
+        >
+          <image href={asset.src} width="1672" height="941" />
 
-        {/* Base Photo Wrap */}
-        <div className="visual-img-wrap">
-          <img src={asset.src} alt={asset.alt} fetchPriority="high" draggable={false} />
-        </div>
+          {/* SVG Laser Scanline */}
+          {scanning && (
+            <line
+              x1="860"
+              y1="0"
+              x2="1672"
+              y2="0"
+              className="svg-laser-line"
+            />
+          )}
+
+          {/* 14 Interactive Pulsing Nodes mapped precisely on yellow sensor pads */}
+          {activeHotspots.map((h) => {
+            const isSelected = selectedHotspot?.id === h.id
+            return (
+              <g
+                key={h.id}
+                transform={`translate(${h.px}, ${h.py})`}
+                className={`svg-node-group ${isSelected ? 'is-selected' : ''} ${h.type === 'mcu' ? 'is-mcu' : ''}`}
+                onMouseEnter={() => setSelectedHotspot(h)}
+                onClick={() => navigate(h.type === 'mcu' ? '/device' : '/lab')}
+                cursor="pointer"
+                role="button"
+                tabIndex={0}
+                aria-label={`压电节点 ${h.id} ${h.label}`}
+              >
+                <circle r="14" className="svg-node-ping" />
+                <circle r={h.type === 'mcu' ? 12 : 9} className="svg-node-core" />
+                <text y="3" textAnchor="middle" className="svg-node-text">{h.id}</text>
+              </g>
+            )
+          })}
+        </svg>
 
         {/* Interactive Layer Filter Toolbar on Top of Photo */}
         <div className="glove-layer-toolbar" role="group" aria-label="传感器图层筛选">
@@ -230,30 +269,6 @@ export function HeroTeachingStage() {
           </button>
         </div>
 
-        {/* 14 Interactive Pulsing Hotspot Nodes on Glove */}
-        <div className="glove-hotspots-overlay" aria-label="手套压电节点交互热点">
-          {activeHotspots.map((h) => {
-            const isSelected = selectedHotspot?.id === h.id
-            return (
-              <button
-                type="button"
-                key={h.id}
-                className={`glove-node-point ${isSelected ? 'is-selected' : ''} ${h.type === 'mcu' ? 'is-mcu' : ''}`}
-                style={{ left: `${h.x}%`, top: `${h.y}%` }}
-                onMouseEnter={() => setSelectedHotspot(h)}
-                onClick={() => navigate(h.type === 'mcu' ? '/device' : '/lab')}
-                aria-label={`压电节点 ${h.id} ${h.label}`}
-                title={`点击进入实验台：${h.label} (${h.diff})`}
-              >
-                <span className="node-ping" />
-                <span className="node-core">
-                  <small>{h.id}</small>
-                </span>
-              </button>
-            )
-          })}
-        </div>
-
         {/* Dynamic Telemetry HUD Card for Hovered Hotspot */}
         {selectedHotspot && (
           <aside className="glove-hotspot-hud-card" aria-live="polite">
@@ -283,7 +298,7 @@ export function HeroTeachingStage() {
             <button
               type="button"
               className="hud-quick-jump"
-              onClick={() => navigate('/lab')}
+              onClick={() => navigate(selectedHotspot.type === 'mcu' ? '/device' : '/lab')}
             >
               <span>在实验台中观测</span>
               <ArrowRight size={13} />
