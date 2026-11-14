@@ -23,7 +23,6 @@ export function DeviceHotspotExplorer() {
   const [resetNonce, setResetNonce] = useState(0)
   const [lifted, setLifted] = useState(false)
   const [expanded, setExpanded] = useState(false)
-  const [popover, setPopover] = useState({ x: 74, y: 32 })
 
   const options = category === 'joint' ? jointHotspots : deviceParts
   const index = Math.max(0, options.findIndex((item) => item.id === selected.id))
@@ -36,7 +35,6 @@ export function DeviceHotspotExplorer() {
       const next = (index + 1) % options.length
       setLifted(true)
       setSelected({ type: category, id: options[next].id })
-      setPopover({ x: 73, y: 30 + (next % 3) * 11 })
     }, 2800)
     return () => window.clearInterval(timer)
   }, [category, index, options, playing])
@@ -49,24 +47,16 @@ export function DeviceHotspotExplorer() {
   }
 
   const selectFromModel = (value: HSADSelectionEvent) => {
-    const rect = stageRef.current?.getBoundingClientRect()
     setLifted(true)
     setPlaying(false)
     setCategory(value.type)
     setSelected({ type: value.type, id: value.id })
-    if (rect) {
-      setPopover({
-        x: Math.min(78, Math.max(38, (value.clientX - rect.left) / rect.width * 100 + 3)),
-        y: Math.min(68, Math.max(16, (value.clientY - rect.top) / rect.height * 100 - 4)),
-      })
-    }
   }
 
   const move = (delta: number) => {
     const next = (index + delta + options.length) % options.length
     setLifted(true)
     setSelected({ type: category, id: options[next].id })
-    setPopover({ x: 74, y: 28 + (next % 4) * 8 })
   }
 
   return (
@@ -78,8 +68,8 @@ export function DeviceHotspotExplorer() {
         <div className="stage-reticle reticle-bl" />
         <div className="stage-reticle reticle-br" />
         <div className="stage-axis-indicator">
-          <span>HSAD-3D STAGE · CAD V7</span>
-          <span className="stage-scale-indicator">1:1 解剖比例</span>
+          <span>HSAD-3D STAGE · FPC 柔性传感阵列 (Rev 7)</span>
+          <span className="stage-scale-indicator">生理关节解剖分布</span>
         </div>
 
         {/* Top Bezel Toolbar */}
@@ -100,6 +90,26 @@ export function DeviceHotspotExplorer() {
             >
               <Layers size={15} />
               <span>装置核心器件</span>
+            </button>
+          </div>
+
+          <div className="toolbar-group sequence-toolbar-group" role="group" aria-label="讲解导览控制">
+            <button onClick={() => move(-1)} aria-label="上一个讲解对象" className="toolbar-btn seq-nav-btn" title="上一个检测单元/器件">
+              <ArrowLeft size={14} />
+            </button>
+            <button
+              onClick={() => setPlaying((value) => !value)}
+              className={`toolbar-btn seq-play-btn ${playing ? 'is-playing' : ''}`}
+              title={playing ? '暂停自动巡回讲解' : '开始自动巡回讲解'}
+            >
+              {playing ? <CircleStop size={14} /> : <Play size={14} />}
+              <span>{playing ? '暂停讲解' : '自动讲解'}</span>
+            </button>
+            <span className="seq-counter">
+              <b>{String(index + 1).padStart(2, '0')}</b> / {String(options.length).padStart(2, '0')}
+            </span>
+            <button onClick={() => move(1)} aria-label="下一个讲解对象" className="toolbar-btn seq-nav-btn" title="下一个检测单元/器件">
+              <ArrowRight size={14} />
             </button>
           </div>
 
@@ -150,7 +160,6 @@ export function DeviceHotspotExplorer() {
         {/* Inspection Popover */}
         <aside
           className="device-popover"
-          style={{ left: `${popover.x}%`, top: `${popover.y}%` }}
           aria-live="polite"
         >
           <div className="popover-header">
@@ -237,42 +246,6 @@ export function DeviceHotspotExplorer() {
             ))}
           </div>
         )}
-
-        {/* Sequence Control Pill */}
-        <div className="stage-sequence">
-          <select
-            className="device-compact-select"
-            aria-label="选择讲解对象"
-            value={selected.id}
-            onChange={(event) => {
-              setPlaying(false)
-              setLifted(true)
-              setSelected({ type: category, id: event.target.value })
-            }}
-          >
-            {options.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-          <button onClick={() => move(-1)} aria-label="上一个讲解对象" className="seq-nav-btn">
-            <ArrowLeft size={15} />
-          </button>
-          <button
-            onClick={() => setPlaying((value) => !value)}
-            className={`seq-play-btn ${playing ? 'is-playing' : ''}`}
-          >
-            {playing ? <CircleStop size={15} /> : <Play size={15} />}
-            <span>{playing ? '暂停讲解' : '自动讲解'}</span>
-          </button>
-          <span className="seq-counter">
-            <b>{String(index + 1).padStart(2, '0')}</b> / {String(options.length).padStart(2, '0')}
-          </span>
-          <button onClick={() => move(1)} aria-label="下一个讲解对象" className="seq-nav-btn">
-            <ArrowRight size={15} />
-          </button>
-        </div>
       </div>
 
       {/* Observation Takeaway Banner */}

@@ -1,19 +1,16 @@
 import {
+  Activity,
   ArrowRight,
-  BookOpenCheck,
-  CirclePlay,
   Cpu,
   Crosshair,
   FlaskConical,
   Focus,
   Layers,
   ScanSearch,
-  Zap,
 } from 'lucide-react'
 import { useState, useRef, type MouseEvent } from 'react'
 import { getImageAsset } from '../data/imageAssets'
 import { navigate } from './AppShell'
-import { useTeachingMode } from './TeachingMode'
 
 interface GloveHotspot {
   id: string
@@ -52,13 +49,12 @@ const GLOVE_HOTSPOTS: GloveHotspot[] = [
   { id: 'L2', label: '小指 PIP', type: 'dip-pip', px: 1055, py: 325, channels: 'CH25/CH26', diff: 'D13', role: '近端指间' },
   { id: 'L1', label: '小指 MCP', type: 'mcp', px: 995, py: 423, channels: 'CH27/CH28', diff: 'D14', role: '掌指关节' },
 
-  // MCU (ESP32-S3 + CH340K)
-  { id: 'MCU', label: 'ESP32-S3 主控板', type: 'mcu', px: 920, py: 620, channels: '28路 ADC', diff: '80Hz', role: '差分调理/主控' },
+  // MCU & Analog MUX (ESP32 双核主控 + TMUX1574 模拟复用)
+  { id: 'MCU', label: 'ESP32 主控与信号调理板', type: 'mcu', px: 920, py: 620, channels: '28路微纳差分 / 模拟复用', diff: '80 Hz 硬件同步', role: 'ESP32 (14路物理ADC)' },
 ]
 
 export function HeroTeachingStage() {
   const asset = getImageAsset('hero')
-  const { mode, setMode } = useTeachingMode()
   const visualRef = useRef<HTMLDivElement>(null)
 
   // Interactive 3D tilt & cursor tracking
@@ -66,7 +62,7 @@ export function HeroTeachingStage() {
   const [coord, setCoord] = useState({ x: 120.4, y: 86.2 })
   const [selectedHotspot, setSelectedHotspot] = useState<GloveHotspot | null>(GLOVE_HOTSPOTS[3]) // default I2
   const [filterLayer, setFilterLayer] = useState<'all' | 'dip-pip' | 'mcp' | 'mcu'>('all')
-  const [scanning, setScanning] = useState(true)
+  const [monitoring, setMonitoring] = useState(true)
 
   const handleMouseMove = (e: MouseEvent<HTMLDivElement>) => {
     if (!visualRef.current) return
@@ -120,51 +116,28 @@ export function HeroTeachingStage() {
           </button>
         </div>
 
-        {/* Compact Tactile Mode Toggle */}
-        <div className="mode-toggle-compact" role="group" aria-label="教学模式切换">
-          <span className="mode-compact-lbl">模式：</span>
-          <button
-            type="button"
-            aria-pressed={mode === 'teacher'}
-            onClick={() => setMode('teacher')}
-            className={`mode-pill-btn ${mode === 'teacher' ? 'is-active' : ''}`}
-          >
-            <CirclePlay size={14} />
-            <span>课堂演示</span>
-          </button>
-          <button
-            type="button"
-            aria-pressed={mode === 'student'}
-            onClick={() => setMode('student')}
-            className={`mode-pill-btn ${mode === 'student' ? 'is-active' : ''}`}
-          >
-            <BookOpenCheck size={14} />
-            <span>自由探索</span>
-          </button>
-        </div>
-
         {/* Crisp Scientific Telemetry Matrix */}
         <dl className="hero-facts">
           <div className="fact-item">
             <dt>检测单元</dt>
-            <dd>14 <small>个</small></dd>
+            <dd>14 <small>单元</small></dd>
           </div>
           <div className="fact-item">
-            <dt>原始通道</dt>
-            <dd>28 <small>路</small></dd>
+            <dt>原始信号</dt>
+            <dd>28 <small>路 (14对)</small></dd>
           </div>
           <div className="fact-item">
             <dt>差分输出</dt>
             <dd>14 <small>路</small></dd>
           </div>
           <div className="fact-item">
-            <dt>映射自由度</dt>
-            <dd>14+3 <small>DOF</small></dd>
+            <dt>硬件采样率</dt>
+            <dd>80 <small>Hz 同步</small></dd>
           </div>
         </dl>
       </div>
 
-      {/* Right Column: High-Tech Interactive Glove Stage with Dynamic Effects */}
+      {/* Right Column: High-Precision Interactive Glove Laboratory Stage */}
       <div
         className="hero-device-visual interactive-glove-stage"
         ref={visualRef}
@@ -175,7 +148,7 @@ export function HeroTeachingStage() {
           transition: tilt.isHover ? 'transform 0.08s ease-out' : 'transform 0.5s ease-out',
         }}
       >
-        {/* Optical Reticles */}
+        {/* Technical Calibration Grid Reticles */}
         <div className="visual-reticle reticle-tl" />
         <div className="visual-reticle reticle-tr" />
         <div className="visual-reticle reticle-bl" />
@@ -186,7 +159,7 @@ export function HeroTeachingStage() {
           <div
             className="glove-specular-glare"
             style={{
-              background: `radial-gradient(circle 240px at ${tilt.px}% ${tilt.py}%, rgba(56, 189, 248, 0.18), transparent 70%)`,
+              background: `radial-gradient(circle 240px at ${tilt.px}% ${tilt.py}%, rgba(8, 131, 149, 0.14), transparent 70%)`,
             }}
           />
         )}
@@ -199,17 +172,6 @@ export function HeroTeachingStage() {
         >
           <image href={asset.src} width="1672" height="941" />
 
-          {/* SVG Laser Scanline */}
-          {scanning && (
-            <line
-              x1="860"
-              y1="0"
-              x2="1672"
-              y2="0"
-              className="svg-laser-line"
-            />
-          )}
-
           {/* 14 Interactive Pulsing Nodes mapped precisely on yellow sensor pads */}
           {activeHotspots.map((h) => {
             const isSelected = selectedHotspot?.id === h.id
@@ -217,7 +179,7 @@ export function HeroTeachingStage() {
               <g
                 key={h.id}
                 transform={`translate(${h.px}, ${h.py})`}
-                className={`svg-node-group ${isSelected ? 'is-selected' : ''} ${h.type === 'mcu' ? 'is-mcu' : ''}`}
+                className={`svg-node-group ${isSelected ? 'is-selected' : ''} ${h.type === 'mcu' ? 'is-mcu' : ''} ${monitoring ? 'is-monitoring' : ''}`}
                 onMouseEnter={() => setSelectedHotspot(h)}
                 onClick={() => navigate(h.type === 'mcu' ? '/device' : '/lab')}
                 cursor="pointer"
@@ -310,23 +272,23 @@ export function HeroTeachingStage() {
         <div className="glove-telemetry-stamp">
           <div className="stamp-left">
             <ScanSearch size={13} />
-            <span>POS: X {coord.x} · Y {coord.y} mm</span>
+            <span>标定坐标: X {coord.x} · Y {coord.y} mm</span>
           </div>
           <div className="stamp-right">
             <span className="stamp-led" />
-            <span>ARRAY: 14/14 CH ACTIVE</span>
+            <span>阵列状态: 14 单元在线 (80Hz)</span>
           </div>
         </div>
 
-        {/* Laser Scanner Control Pill */}
+        {/* Channel Telemetry State Control Pill */}
         <button
           type="button"
-          className={`glove-scan-toggle ${scanning ? 'is-active' : ''}`}
-          onClick={(e) => { e.stopPropagation(); setScanning(!scanning) }}
-          title={scanning ? '暂停激光雷达扫描' : '开启激光雷达扫描'}
+          className={`glove-scan-toggle ${monitoring ? 'is-active' : ''}`}
+          onClick={(e) => { e.stopPropagation(); setMonitoring(!monitoring) }}
+          title={monitoring ? '暂停阵列动态监测' : '恢复阵列动态监测'}
         >
-          <Zap size={12} />
-          <span>{scanning ? '雷达扫描中' : '扫描暂停'}</span>
+          <Activity size={12} />
+          <span>{monitoring ? '阵列遥测中 (80Hz)' : '遥测已暂停'}</span>
         </button>
       </div>
     </section>

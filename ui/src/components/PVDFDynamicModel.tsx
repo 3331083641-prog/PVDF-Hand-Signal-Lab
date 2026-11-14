@@ -380,7 +380,7 @@ export function PVDFLearningWorkspace() {
           <div className="stage-reticle reticle-bl" />
           <div className="stage-reticle reticle-br" />
 
-          <Canvas camera={{ position: [0, 2.7, 8.5], fov: 37 }} dpr={[1, 1.5]}>
+          <Canvas className="pvdf-ribbon-canvas" camera={{ position: [0, 2.7, 8.5], fov: 37 }} dpr={[1, 1.5]}>
             <BilayerScene
               bend={physicalAngle}
               direction={direction}
@@ -584,48 +584,57 @@ export function PVDFLearningWorkspace() {
 
       {/* Principle Modal Drawer */}
       {showPrinciple && (
-        <aside className="principle-popover pvdf-principle-detail" aria-label="物理机理本构方程详解">
-          <div className="popover-bar">
-            <strong className="popover-title">正压电效应本构方程与双通道差分模型</strong>
-            <button className="popover-close-btn" onClick={() => setShowPrinciple(false)} aria-label="关闭本构方程详解">
-              <X size={18} />
-            </button>
-          </div>
-
-          <div className="popover-content">
-            <p className="popover-lead">
-              PVDF（聚偏氟乙烯）在极化后形成有序偶极。机械弯曲应力改变偶极取向与电位移，电极界面自由电荷发生重新分布：
-            </p>
-
-            <div className="formula-block">
-              <div className="formula-row">
-                <span className="formula-label">压电本构方程：</span>
-                <code>D₃ = d₃₁ · T₁ + ε₃₃ᵀ · E₃</code>
+        <div className="principle-modal-backdrop" onClick={() => setShowPrinciple(false)}>
+          <aside
+            className="principle-popover pvdf-principle-detail"
+            aria-label="物理机理本构方程详解"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="popover-bar">
+              <div className="popover-title-row">
+                <span className="popover-badge">理论推演</span>
+                <strong className="popover-title">正压电效应本构方程与双通道差分模型</strong>
               </div>
-              <div className="formula-row">
-                <span className="formula-label">虚地近似条件：</span>
-                <code>D₃ ≈ d₃₁ · T₁  (电荷放大器输入电场 E₃ ≈ 0)</code>
-              </div>
-              <div className="formula-row">
-                <span className="formula-label">界面感应电荷：</span>
-                <code>Q = ∬_A D · n dA</code>
-              </div>
-              <div className="formula-row">
-                <span className="formula-label">双通道差分输出：</span>
-                <code>Udiff(t) = [ V₊(t) − V₋(t) ] / 2</code>
-              </div>
+              <button className="popover-close-btn" onClick={() => setShowPrinciple(false)} aria-label="关闭本构方程详解">
+                <X size={18} />
+              </button>
             </div>
 
-            <div className="popover-raw-preview">
-              <span className="preview-label">原始正反相双通道响应对照 (V+ / V−)：</span>
-              <RealtimeSignalChart history={history} mode="raw" compact />
-            </div>
+            <div className="popover-content">
+              <p className="popover-lead">
+                PVDF（聚偏氟乙烯）在极化后形成有序偶极。机械弯曲应力改变偶极取向与电位移，电极界面自由电荷发生重新分布：
+              </p>
 
-            <small className="popover-footnote">
-              * 红色 V₊ 与蓝色 V₋ 为推演引擎根据论文物理约束生成的对称双通道响应；数据作为物理机理演示与实验教学依据。
-            </small>
-          </div>
-        </aside>
+              <div className="formula-block">
+                <div className="formula-row">
+                  <span className="formula-label">压电本构方程：</span>
+                  <code>D₃ = d₃₁ · T₁ + ε₃₃ᵀ · E₃</code>
+                </div>
+                <div className="formula-row">
+                  <span className="formula-label">虚地近似条件：</span>
+                  <code>D₃ ≈ d₃₁ · T₁  (电荷放大器输入电场 E₃ ≈ 0)</code>
+                </div>
+                <div className="formula-row">
+                  <span className="formula-label">界面感应电荷：</span>
+                  <code>Q = ∬_A D · n dA</code>
+                </div>
+                <div className="formula-row">
+                  <span className="formula-label">双通道差分输出：</span>
+                  <code>Udiff(t) = [ V₊(t) − V₋(t) ] / 2</code>
+                </div>
+              </div>
+
+              <div className="popover-raw-preview">
+                <span className="preview-label">原始正反相双通道响应对照 (V+ / V−)：</span>
+                <RealtimeSignalChart history={history} mode="raw" compact />
+              </div>
+
+              <small className="popover-footnote">
+                * 红色 V₊ 与蓝色 V₋ 为推演引擎根据论文物理约束生成的对称双通道响应；数据作为物理机理演示与实验教学依据。
+              </small>
+            </div>
+          </aside>
+        </div>
       )}
     </section>
   )
