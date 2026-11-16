@@ -23,7 +23,7 @@ interface SerialPort extends EventTarget {
 
 interface Serial extends EventTarget {
   getPorts(): Promise<SerialPort[]>
-  requestPort(options?: { filters?: Array<{ usbVendorId?: number; usbProductId?: number }> }): Promise<SerialPort>
+  requestPort(options?: { filters?: Array<{ usbVendorId?: number; usbProductId?: number; bluetoothServiceClassId?: string }> }): Promise<SerialPort>
 }
 
 interface Navigator {

@@ -1,7 +1,8 @@
+import { parseHsadFrame } from './hsadFrame'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { jointHotspots, type JointId } from '../data/jointHotspots'
 import type { SignalMetrics } from '../simulation/signalTypes'
-import { HSAD_BAUD_RATE, HSAD_FRAME_FIELDS, HsadSerialProcessor, type SerialProcessorSnapshot } from './hsadSerialProcessor'
+import { HSAD_BAUD_RATE, HsadSerialProcessor, type SerialProcessorSnapshot } from './hsadSerialProcessor'
 
 export type SerialConnectionState = 'unsupported' | 'idle' | 'requesting' | 'opening' | 'calibrating' | 'connected' | 'stale' | 'error'
 
@@ -35,14 +36,14 @@ export function useHsadSerial(selectedId: JointId, enabled: boolean) {
   const [snapshot, setSnapshot] = useState<SerialProcessorSnapshot>(() => emptySnapshot())
   const [state, setState] = useState<SerialConnectionState>(() => navigator.serial ? 'idle' : 'unsupported')
   const [error, setError] = useState('')
-  const [deviceLabel, setDeviceLabel] = useState('COM8 / CH340K')
+  const [deviceLabel, setDeviceLabel] = useState('未选择设备')
 
   const publish = useCallback(() => setSnapshot(processorRef.current.getSnapshot()), [])
 
   const stopReading = useCallback(async () => {
     readAbortRef.current = true
     try { await readerRef.current?.cancel() } catch { /* 端口可能已由系统断开。 */ }
-    readerRef.current?.releaseLock()
+    try { readerRef.current?.releaseLock() } catch { /* 读取循环可能已释放锁。 */ }
     readerRef.current = null
   }, [])
 
@@ -65,14 +66,18 @@ export function useHsadSerial(selectedId: JointId, enabled: boolean) {
     try {
       while (!readAbortRef.current) {
         const { value, done } = await reader.read()
-        if (done) break
+        if (done) {
+          if (!readAbortRef.current) { setState('error'); setError('设备数据流已关闭，请重新连接。') }
+          break
+        }
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split(/\r?\n/)
         buffer = lines.pop() ?? ''
+        if (buffer.length > 8192) { buffer = ''; processorRef.current.noteInvalidFrame() }
         for (const line of lines) {
           if (!line.trim()) continue
-          const values = line.split(',').map((item) => Number(item.trim()))
-          if (values.length !== HSAD_FRAME_FIELDS || values.some((item) => !Number.isFinite(item))) {
+          const values = parseHsadFrame(line)
+          if (!values) {
             processorRef.current.noteInvalidFrame()
             continue
           }
@@ -83,7 +88,7 @@ export function useHsadSerial(selectedId: JointId, enabled: boolean) {
           lastPaint = now
           const next = processorRef.current.getSnapshot()
           setSnapshot(next)
-          setState(next.baselineReady ? 'connected' : 'calibrating')
+          if (performance.now() - lastValidFrameRef.current < 1200) setState(next.baselineReady ? 'connected' : 'calibrating')
         }
       }
     } catch (reason) {
@@ -94,10 +99,13 @@ export function useHsadSerial(selectedId: JointId, enabled: boolean) {
     } finally {
       try { reader.releaseLock() } catch { /* 锁可能已经释放。 */ }
       if (readerRef.current === reader) readerRef.current = null
+      try { await port.close() } catch { /* 设备可能已被断开。 */ }
+      if (portRef.current === port) portRef.current = null
     }
   }, [])
 
-  const connect = useCallback(async () => {
+  const connect = useCallback(async (transport: 'usb' | 'bluetooth' = 'usb') => {
+    if (portRef.current) return
     if (!navigator.serial) {
       setState('unsupported')
       setError('当前浏览器不支持 Web Serial，请使用最新版桌面 Chrome 或 Edge。')
@@ -106,23 +114,24 @@ export function useHsadSerial(selectedId: JointId, enabled: boolean) {
     setError('')
     try {
       setState('requesting')
-      const authorizedPorts = await navigator.serial.getPorts()
-      const authorizedCh340 = authorizedPorts.find((candidate) => candidate.getInfo().usbVendorId === 0x1a86)
-      const port = authorizedCh340 ?? await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x1a86 }] })
+      const port = await navigator.serial.requestPort(transport === 'bluetooth'
+        ? { filters: [{ bluetoothServiceClassId: '00001101-0000-1000-8000-00805f9b34fb' }] }
+        : { filters: [{ usbVendorId: 0x1a86 }] })
       portRef.current = port
       const info = port.getInfo()
-      setDeviceLabel(info.usbVendorId === 0x1a86 ? 'USB-SERIAL CH340K (COM8)' : `USB 串口 ${info.usbVendorId?.toString(16) ?? ''}`)
+      setDeviceLabel(transport === 'bluetooth' ? '蓝牙 SPP · 已选设备' : `USB CH340 · VID ${info.usbVendorId?.toString(16) ?? '未知'}`)
       setState('opening')
       await port.open({ baudRate: HSAD_BAUD_RATE, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', bufferSize: 65536 })
+      if (!port.readable) throw new Error('设备已打开，但没有可读数据流。')
       try { await port.setSignals({ dataTerminalReady: false, requestToSend: false }) } catch { /* 部分 CH340 驱动不暴露控制线。 */ }
-      processorRef.current.rebaseline()
-      processorRef.current.resetAngles()
+      processorRef.current = new HsadSerialProcessor()
+      lastValidFrameRef.current = performance.now()
       publish()
       setState('calibrating')
       void readLoop(port)
     } catch (reason) {
       const message = reason instanceof DOMException && reason.name === 'NotFoundError'
-        ? '未选择串口。请重试并选择 USB-SERIAL CH340K (COM8)。'
+        ? '未选择设备。USB 请选择采集板；蓝牙请先在 Windows 中配对支持 SPP 的手套。'
         : reason instanceof Error ? reason.message : '无法打开串口。'
       setError(message)
       setState('error')
@@ -140,7 +149,7 @@ export function useHsadSerial(selectedId: JointId, enabled: boolean) {
   const finishJointMapping = useCallback(() => { const result = processorRef.current.finishJointMapping(); publish(); return result }, [publish])
 
   useEffect(() => {
-    if (!enabled || (state !== 'connected' && state !== 'calibrating')) return
+    if (!enabled || !['connected', 'calibrating', 'stale'].includes(state)) return
     const timer = window.setInterval(() => {
       if (lastValidFrameRef.current && performance.now() - lastValidFrameRef.current > 1200) setState('stale')
     }, 500)

@@ -21,6 +21,7 @@ export type HSADSelectionEvent = HSADSelection & { clientX: number; clientY: num
 
 type HandProps = {
   angles: JointAngles
+  orientationOrder?: THREE.EulerOrder
   pitch?: number
   yaw?: number
   roll?: number
@@ -156,7 +157,7 @@ function ModelControls({ targetObject, focusKey = '', resetNonce = 0, inspecting
   return null
 }
 
-function LoadedHand({ angles, pitch = 0, yaw = 0, roll = 0, selected, onSelect, resetNonce, presentation, lifted = false, expanded = false }: HandProps) {
+function LoadedHand({ angles, orientationOrder = 'YXZ', pitch = 0, yaw = 0, roll = 0, selected, onSelect, resetNonce, presentation, lifted = false, expanded = false }: HandProps) {
   const gltf = useLoader(GLTFLoader, HSAD_MODEL_URL, (loader) => {
     const draco = new DRACOLoader()
     draco.setDecoderPath(`${import.meta.env.BASE_URL}draco/`)
@@ -268,7 +269,7 @@ function LoadedHand({ angles, pitch = 0, yaw = 0, roll = 0, selected, onSelect, 
     }
     if (root.current) {
       targetQuaternion.setFromEuler(new THREE.Euler(
-        THREE.MathUtils.degToRad(pitch), THREE.MathUtils.degToRad(yaw), THREE.MathUtils.degToRad(roll), 'YXZ',
+        THREE.MathUtils.degToRad(pitch), THREE.MathUtils.degToRad(yaw), THREE.MathUtils.degToRad(roll), orientationOrder,
       ))
       root.current.quaternion.slerp(targetQuaternion, 1 - Math.exp(-delta * 7))
     }

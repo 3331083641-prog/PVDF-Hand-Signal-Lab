@@ -1,5 +1,6 @@
 import { Cable, CircleAlert, Pause, Play, Radio, RotateCcw, Unplug, Cpu, Waves, Activity } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { Euler, MathUtils, Quaternion } from 'three'
 import { jointHotspots, type JointId } from '../data/jointHotspots'
 import { defaultJointAngles, mappingPresets, type JointAngles } from '../data/mappingPresets'
 import { useHsadSerial } from '../serial/useHsadSerial'
@@ -22,6 +23,7 @@ export function JointMappingBench() {
   const [playing, setPlaying] = useState(true)
   const [continuous, setContinuous] = useState(false)
   const [resetNonce, setResetNonce] = useState(0)
+  const [neutralOrientation, setNeutralOrientation] = useState<Quaternion | null>(null)
   const [serialNotice, setSerialNotice] = useState('')
 
   const selected = useMemo(() => jointHotspots.find((joint) => joint.id === selectedId) ?? jointHotspots[0], [selectedId])
@@ -42,7 +44,24 @@ export function JointMappingBench() {
   const physicalAngle = source === 'serial' ? mappedAngle : teaching.physicalAngle
   const serialActive = ['calibrating', 'connected', 'stale'].includes(serial.state)
   const stageAngles = source === 'serial' && serialActive ? serial.angles : angles
-  const stageOrientation = source === 'serial' && serialActive ? serial.orientation : orientation
+  const measuredOrientation = serial.orientation
+  // Empirical glove mapping: sensor roll -> pitch, -pitch -> yaw, yaw -> roll.
+  // The isolated wrist-pitch experiment predominantly changed sensor roll.
+  // Preserve the incoming sensor values and teaching controls.
+  const measuredQuaternion = useMemo(() => new Quaternion().setFromEuler(new Euler(
+    MathUtils.degToRad(measuredOrientation.roll),
+    MathUtils.degToRad(-measuredOrientation.pitch),
+    MathUtils.degToRad(measuredOrientation.yaw), 'ZYX',
+  )), [measuredOrientation.roll, measuredOrientation.pitch, measuredOrientation.yaw])
+  const stageOrientation = useMemo(() => {
+    if (!(source === 'serial' && serialActive)) return orientation
+    const relative = neutralOrientation
+      ? neutralOrientation.clone().invert().multiply(measuredQuaternion)
+      : measuredQuaternion
+    const euler = new Euler().setFromQuaternion(relative, 'ZYX')
+    // Reverse left/right yaw and reduce its displayed response to 70%.
+    return { pitch: MathUtils.radToDeg(euler.x), yaw: -0.7 * MathUtils.radToDeg(euler.y), roll: MathUtils.radToDeg(euler.z) }
+  }, [source, serialActive, orientation, neutralOrientation, measuredQuaternion])
 
   useEffect(() => {
     if (source === 'serial') return
@@ -76,18 +95,20 @@ export function JointMappingBench() {
   }
 
   const resetAll = () => {
-    if (source === 'serial') {
-      serial.resetAngles()
-      setSerialNotice('14 个关节积分角度已归零。')
-      return
-    }
     setContinuous(false)
-    setAngles({ ...defaultJointAngles })
-    setTargetAngle(defaultJointAngles[selectedId] ?? 0)
+    setAngles(Object.fromEntries(jointHotspots.map(joint => [joint.id, 0])))
+    setTargetAngle(0)
     setOrientation({ pitch: 0, yaw: 0, roll: 0 })
-    setPlaying(true)
-    setResetNonce((value) => value + 1)
-    teaching.reset(defaultJointAngles[selectedId] ?? 0)
+    setPlaying(false)
+    teaching.reset(0)
+    setResetNonce(value => value + 1)
+    if ((source === 'serial' && serialActive)) {
+      setNeutralOrientation(measuredQuaternion.clone())
+    }
+    if (source === 'serial') {
+      serial.rebaseline()
+      setSerialNotice('手指已归零，当前手套姿态设为平放中立位。请保持静止完成零点校准，再继续转动。')
+    }
   }
 
   const modelSelect = (selection: HSADSelectionEvent) => {
@@ -96,7 +117,7 @@ export function JointMappingBench() {
 
   const serialStatus = (() => {
     if (serial.state === 'unsupported') return '浏览器不支持 WebSerial'
-    if (serial.state === 'requesting') return '等待选择 COM8'
+    if (serial.state === 'requesting') return '等待选择设备'
     if (serial.state === 'opening') return '正在打开串口'
     if (serial.state === 'calibrating') return `零点校准 ${Math.round(serial.baselineProgress * 100)}%`
     if (serial.state === 'connected') return `${serial.metrics.sampleRate.toFixed(1)} Hz 在线`
@@ -208,12 +229,12 @@ export function JointMappingBench() {
             <div className="serial-empty-icon">
               {serial.state === 'error' ? <CircleAlert size={28} /> : <Cable size={28} />}
             </div>
-            <strong>{serial.state === 'unsupported' ? '请使用桌面版 Chromium 内核浏览器' : '连接实物采集板 USB-SERIAL CH340K'}</strong>
-            <span>在浏览器端口选择器中选择 COM8。通信协议：460800 baud、31 字段数据帧、80 Hz 实时传输。</span>
+            <strong>{serial.state === 'unsupported' ? '请使用桌面版 Chromium 内核浏览器' : '连接 USB 采集板或蓝牙手套'}</strong>
+            <span>USB 请选择系统显示的采集板端口；蓝牙需先在 Windows 配对手套。接收 28 路电压与 3 轴姿态的 31 字段数据帧。</span>
             {serial.error && <em className="serial-error-msg">{serial.error}</em>}
             <button
               type="button"
-              onClick={() => void serial.connect()}
+              onClick={() => { setSource('serial'); void serial.connect() }}
               disabled={
                 serial.state === 'unsupported' ||
                 serial.state === 'requesting' ||
@@ -222,8 +243,14 @@ export function JointMappingBench() {
               className="serial-connect-btn"
             >
               <Cable size={16} />
-              <span>连接实物串口 (COM8)</span>
+              <span>连接 USB 采集板</span>
             </button>
+            <button type="button" className="serial-connect-btn"
+              disabled={serialActive || ['unsupported', 'requesting', 'opening'].includes(serial.state)}
+              onClick={() => { setSource('serial'); void serial.connect('bluetooth') }}>
+              <Radio size={16} /><span>连接蓝牙手套（SPP）</span>
+            </button>
+            <small>先在 Windows 蓝牙设置中配对 HSAD-Glove，再选择其 SPP 设备。连接后由蓝牙直接驱动关节和 IMU 姿态，无需 Python。</small>
           </div>
         ) : (
           <RealtimeSignalChart history={history} mode={displayMode} />
@@ -315,6 +342,7 @@ export function JointMappingBench() {
 
         <HSADHand3D
           angles={stageAngles}
+          orientationOrder={(source === 'serial' && serialActive) ? 'ZYX' : 'YXZ'}
           pitch={stageOrientation.pitch}
           yaw={stageOrientation.yaw}
           roll={stageOrientation.roll}
@@ -428,18 +456,17 @@ export function JointMappingBench() {
 
         {/* Spatial Orientation Grid */}
         <div className="orientation-section">
-          <span className="picker-block-title">三轴空间姿态微调</span>
           <div className="orientation-grid">
             {(['pitch', 'yaw', 'roll'] as const).map((key) => (
               <label key={key} className="orient-cell">
                 <div className="orient-head">
-                  <span>{key[0].toUpperCase() + key.slice(1)}</span>
+                  <span>{{ pitch: '俯仰 Pitch', yaw: '偏航 Yaw', roll: '横滚 Roll' }[key]}</span>
                   <output>{stageOrientation[key].toFixed(source === 'serial' ? 1 : 0)}°</output>
                 </div>
                 <input
                   type="range"
-                  min="-35"
-                  max="35"
+                  min="-180"
+                  max="180"
                   value={stageOrientation[key]}
                   disabled={source === 'serial'}
                   onChange={(event) =>
@@ -556,6 +583,7 @@ export function JointMappingBench() {
             <button
               aria-pressed={source === 'teaching'}
               onClick={() => {
+                void serial.disconnect()
                 setSource('teaching')
                 setPlaying(true)
               }}
@@ -569,12 +597,12 @@ export function JointMappingBench() {
               onClick={() => {
                 setSource('serial')
                 setPlaying(false)
-                if (serial.state === 'idle' || serial.state === 'error') void serial.connect()
+
               }}
               className={`source-btn ${source === 'serial' ? 'is-active is-serial' : ''}`}
             >
               <Radio size={14} />
-              <span>实时串口 (COM8)</span>
+              <span>实物 USB / 蓝牙</span>
             </button>
           </div>
         </div>
