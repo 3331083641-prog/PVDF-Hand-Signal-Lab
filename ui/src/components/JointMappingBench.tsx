@@ -250,7 +250,12 @@ export function JointMappingBench() {
               onClick={() => { setSource('serial'); void serial.connect('bluetooth') }}>
               <Radio size={16} /><span>连接蓝牙手套（SPP）</span>
             </button>
-            <small>先在 Windows 蓝牙设置中配对 HSAD-Glove，再选择其 SPP 设备。连接后由蓝牙直接驱动关节和 IMU 姿态，无需 Python。</small>
+            <button type="button" className="serial-connect-btn"
+              disabled={serialActive || ['requesting', 'opening'].includes(serial.state)}
+              onClick={() => { setSource('serial'); void serial.connectShared() }}>
+              <Activity size={16} /><span>连接 Python 共享数据</span>
+            </button>
+            <small>直接连接蓝牙时请选择 HSAD-Glove；需要同时查看 Python 采集界面时，先启动共享采集程序，再连接 Python 共享数据。</small>
           </div>
         ) : (
           <RealtimeSignalChart history={history} mode={displayMode} />

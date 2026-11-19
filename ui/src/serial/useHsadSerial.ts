@@ -30,6 +30,7 @@ const emptyMetrics: SignalMetrics = { currentVPlus: 1.65, currentVMinus: 1.65, c
 export function useHsadSerial(selectedId: JointId, enabled: boolean) {
   const processorRef = useRef(new HsadSerialProcessor())
   const portRef = useRef<SerialPort | null>(null)
+  const sharedRef = useRef<EventSource | null>(null)
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null)
   const readAbortRef = useRef(false)
   const lastValidFrameRef = useRef(0)
@@ -41,6 +42,8 @@ export function useHsadSerial(selectedId: JointId, enabled: boolean) {
   const publish = useCallback(() => setSnapshot(processorRef.current.getSnapshot()), [])
 
   const stopReading = useCallback(async () => {
+    sharedRef.current?.close()
+    sharedRef.current = null
     readAbortRef.current = true
     try { await readerRef.current?.cancel() } catch { /* 端口可能已由系统断开。 */ }
     try { readerRef.current?.releaseLock() } catch { /* 读取循环可能已释放锁。 */ }
@@ -105,7 +108,7 @@ export function useHsadSerial(selectedId: JointId, enabled: boolean) {
   }, [])
 
   const connect = useCallback(async (transport: 'usb' | 'bluetooth' = 'usb') => {
-    if (portRef.current) return
+    if (portRef.current || sharedRef.current) return
     if (!navigator.serial) {
       setState('unsupported')
       setError('当前浏览器不支持 Web Serial，请使用最新版桌面 Chrome 或 Edge。')
@@ -139,6 +142,55 @@ export function useHsadSerial(selectedId: JointId, enabled: boolean) {
       portRef.current = null
     }
   }, [publish, readLoop])
+
+  const connectShared = useCallback(async () => {
+    await disconnect()
+    processorRef.current = new HsadSerialProcessor()
+    publish()
+    setDeviceLabel('Python 共享 · 蓝牙 COM24')
+    setState('opening')
+    lastValidFrameRef.current = 0
+    const feed = new EventSource('http://127.0.0.1:8766/events')
+    sharedRef.current = feed
+    let previousSequence: number | null = null
+    let lastPaint = 0
+    const fail = (message: string) => {
+      feed.close()
+      if (sharedRef.current !== feed) return
+      sharedRef.current = null
+      setState('error')
+      setError(message)
+    }
+    feed.onopen = () => {
+      if (sharedRef.current !== feed) return
+      lastValidFrameRef.current = performance.now()
+      setState('calibrating')
+    }
+    feed.onmessage = (event) => {
+      if (sharedRef.current !== feed) return
+      try {
+        const batch = JSON.parse(event.data) as { sequence: number; values: number[] }[]
+        if (!Array.isArray(batch)) throw new Error('数据格式无效')
+        for (const frame of batch) {
+          if (!Number.isSafeInteger(frame.sequence) || (previousSequence !== null && frame.sequence !== previousSequence + 1)) {
+            throw new Error('数据序号不连续，请重新连接并校零')
+          }
+          const values = Array.isArray(frame.values) ? parseHsadFrame(frame.values.join(',')) : null
+          if (!values) throw new Error('数据帧无效')
+          previousSequence = frame.sequence
+          if (processorRef.current.process(values)) lastValidFrameRef.current = performance.now()
+        }
+        if (performance.now() - lastPaint >= 33) {
+          lastPaint = performance.now()
+          const next = processorRef.current.getSnapshot()
+          setSnapshot(next)
+          setState(next.baselineReady ? 'connected' : 'calibrating')
+        }
+      } catch (reason) { fail(`共享采集中断：${reason instanceof Error ? reason.message : '数据异常'}`) }
+    }
+    feed.addEventListener('gap', () => fail('共享数据积压，请重新连接并校零。'))
+    feed.onerror = () => fail('Python 共享采集未启动或已断开，请启动共享采集程序后重新连接。')
+  }, [disconnect, publish])
 
   const rebaseline = useCallback(() => { processorRef.current.rebaseline(); processorRef.current.resetAngles(); publish(); setState('calibrating') }, [publish])
   const resetAngles = useCallback(() => { processorRef.current.resetAngles(); publish() }, [publish])
@@ -184,6 +236,7 @@ export function useHsadSerial(selectedId: JointId, enabled: boolean) {
     invalidFrames: snapshot.invalidFrames,
     metrics,
     connect,
+    connectShared,
     disconnect,
     rebaseline,
     resetAngles,

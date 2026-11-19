@@ -4,6 +4,10 @@
 
 [打开在线实验室](https://3331083641-prog.github.io/PVDF-Hand-Signal-Lab/)
 
+[![扫码打开在线实验室](ui/public/lab-qr.png)](https://3331083641-prog.github.io/PVDF-Hand-Signal-Lab/)
+
+每次推送到 `main` 后，GitHub Actions 会从 `ui/` 构建并发布。部署成功后，再次扫描同一张二维码即可打开新版界面。
+
 ## 界面截图与操作说明
 
 以下四张截图记录了教学界面，浏览器视口为 1600 × 1050。可点击图片查看原图。
@@ -43,7 +47,7 @@
 - ui/assets/reference/ — 正面器件参考照片与布局数据。
 - ui/tools/blender/ — 建模、参考图轮廓提取和模型导出脚本。
 - ui/docs/ — 教学、串口、模型及工程说明。
-- 根目录 index.html、assets/、models/、draco/ — GitHub Pages 网页发布文件。
+- .github/workflows/deploy-ui.yml — GitHub Pages 自动部署配置，发布内容来自构建生成的 `ui/dist/`。
 
 ## 本地开发
 
